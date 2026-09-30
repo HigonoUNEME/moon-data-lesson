@@ -24,13 +24,13 @@ export default function App() {
     autoRotate: false,
     rotationSpeed: 0.35,
     wireframe: false,
-    showGrid: true,
     lightIntensity: 2.2,
     moonRotationDeg: 0,
     selectedCategoryFilter: 'all',
-    // データ層は既定でオン、「1日の温度」を最初に見せる
-    showDataLayer: true,
-    dataLayerKey: 'diurnal_temp'
+    // データ層は既定でオフ（まず月そのものを見せる）。「1日の温度」は重ねたときの既定の層として残す
+    showDataLayer: false,
+    dataLayerKey: 'diurnal_temp',
+    showMoonTexture: true
   });
 
   const handleUpdateSettings = useCallback((patch: Partial<MoonViewerSettings>) => {

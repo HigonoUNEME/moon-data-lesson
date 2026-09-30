@@ -41,7 +41,6 @@ export interface MoonViewerSettings {
   autoRotate: boolean;
   rotationSpeed: number;
   wireframe: boolean;
-  showGrid: boolean;
   lightIntensity: number;
   /** 月の自転角（0〜360度）。太陽は世界座標で固定し、この角度だけ月本体を回すことで昼夜が
    *  移り変わる（＝「1日の温度アニメーション」のどのフレームを見せるかも、この角度から決まる）。
@@ -52,4 +51,7 @@ export interface MoonViewerSettings {
   showDataLayer: boolean;
   /** 表示中のデータ層のキー（site_environment.csv の列名、または 'diurnal_temp'＝1日のアニメーション） */
   dataLayerKey: string;
+  /** 月の実写テクスチャ（色）を表示するか。オフにすると素の灰色の球になり、データ層の色が
+   *  月面写真自体の色と紛れない（「月の色なのかデータなのか分からない」という指摘への対応）。 */
+  showMoonTexture: boolean;
 }

@@ -11,7 +11,7 @@ import {
   RotateCcw,
   RotateCw,
   Compass,
-  Layers,
+  Image,
   ZoomIn,
   ZoomOut,
   Play,
@@ -198,7 +198,6 @@ export const MoonViewer3D: React.FC<MoonViewer3DProps> = ({
   const overlayMeshRef = useRef<THREE.Mesh | null>(null);
   const overlayMaterialRef = useRef<THREE.MeshBasicMaterial | null>(null);
   const overlayGridGroupRef = useRef<THREE.Group | null>(null);
-  const gridMeshRef = useRef<THREE.Group | null>(null);
   const sunLightRef = useRef<THREE.DirectionalLight | null>(null);
   const earthMeshRef = useRef<THREE.Mesh | null>(null); // 遊び心の地球（潮汐固定＝自転と同じ速さで空を巡る）
   const sunMeshRef = useRef<THREE.Mesh | null>(null);    // 遊び心の太陽（世界座標で固定。月が自転する）
@@ -208,6 +207,8 @@ export const MoonViewer3D: React.FC<MoonViewer3DProps> = ({
   const textureCacheRef = useRef<Map<string, Promise<THREE.Texture>>>(new Map());
   // 月面写真の現在の解像度段階（ズームで 2k → 4k → 8k と上げる。下げてキャッシュ済みなら再読込なし）
   const moonTexTierRef = useRef<MoonTexTier>('2k');
+  // 現在読み込み済みの月面実写テクスチャ（表示オフ中もここに保持し、オンに戻したら再適用する）
+  const moonPhotoTextureRef = useRef<THREE.Texture | null>(null);
   // 1日の温度アニメーション（24枚）。選んだときに一度だけ読み込む
   const diurnalTexturesRef = useRef<THREE.Texture[] | null>(null);
   const [diurnalLoading, setDiurnalLoading] = useState(false);
@@ -323,6 +324,23 @@ export const MoonViewer3D: React.FC<MoonViewer3DProps> = ({
     return p;
   };
 
+  /** 月の実写テクスチャ（色）を表示するかどうかを、今の月面メッシュに反映する。
+   *  「データ層の色なのか、月面写真自体の色なのか分からない」という指摘への対応：
+   *  オフのときは色テクスチャだけ外し（bumpMapは残すので陰影自体は見える）、素の灰色にする。
+   *  animate ループより前に定義し、テクスチャの読み込み完了時・設定変更時の両方から呼べるようにする。 */
+  const applyMoonTextureVisibility = () => {
+    const mat = moonMeshRef.current?.material;
+    if (!(mat instanceof THREE.MeshStandardMaterial)) return;
+    if (settingsRef.current.showMoonTexture) {
+      mat.map = moonPhotoTextureRef.current;
+      mat.color.setHex(0xffffff);
+    } else {
+      mat.map = null;
+      mat.color.setHex(0x8a8a8a);
+    }
+    mat.needsUpdate = true;
+  };
+
   // Initialize Three.js Scene (once)
   useEffect(() => {
     if (!containerRef.current || !canvasRef.current) return;
@@ -420,12 +438,12 @@ export const MoonViewer3D: React.FC<MoonViewer3DProps> = ({
         tex.wrapT = THREE.ClampToEdgeWrapping;
         tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
         photoTexture = tex;
+        moonPhotoTextureRef.current = tex;
         if (moonMeshRef.current?.material instanceof THREE.MeshStandardMaterial) {
           const m = moonMeshRef.current.material;
-          m.map = tex;
-          m.bumpMap = tex;
+          m.bumpMap = tex; // 陰影用。色テクスチャの表示オン/オフに関わらず常に使う
           m.bumpScale = 0.012;
-          m.needsUpdate = true;
+          applyMoonTextureVisibility();
         }
       },
       undefined,
@@ -502,9 +520,8 @@ export const MoonViewer3D: React.FC<MoonViewer3DProps> = ({
     axisLine.computeLineDistances();
     gridGroup.add(axisLine);
 
-    gridGroup.visible = settings.showGrid;
+    // 緯度経度グリッドは常時表示（トグル廃止。月画像の表示切替で代わりに見やすさを確保する）
     moonSpinGroup.add(gridGroup);
-    gridMeshRef.current = gridGroup;
 
     // クリックした地点に立てる目印（要望：「クリックしてある地点にピンを立てて、データを表示する」）。
     // moonSpinGroup の子にすることで、自転しても地点に張り付いたまま一緒に回る。
@@ -751,12 +768,12 @@ export const MoonViewer3D: React.FC<MoonViewer3DProps> = ({
           if (moonTexTierRef.current !== wantTier) return; // その間にさらにズームが変わっていたら古い結果は捨てる
           tex.colorSpace = THREE.SRGBColorSpace;
           tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+          moonPhotoTextureRef.current = tex;
           const mat = moonMeshRef.current?.material;
           if (mat instanceof THREE.MeshStandardMaterial) {
-            mat.map = tex;
             mat.bumpMap = tex;
             mat.bumpScale = 0.012;
-            mat.needsUpdate = true;
+            applyMoonTextureVisibility();
           }
         });
       }
@@ -808,17 +825,17 @@ export const MoonViewer3D: React.FC<MoonViewer3DProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ワイヤーフレーム・グリッド・明るさ・データ層表示。太陽の向きは世界座標で固定（月のほうが自転する）
+  // ワイヤーフレーム・明るさ・データ層表示・月面写真の表示。太陽の向きは世界座標で固定（月のほうが自転する）
   useEffect(() => {
     if (moonMeshRef.current?.material instanceof THREE.MeshStandardMaterial) {
       moonMeshRef.current.material.wireframe = settings.wireframe;
       moonMeshRef.current.material.needsUpdate = true;
     }
-    if (gridMeshRef.current) gridMeshRef.current.visible = settings.showGrid;
     if (sunLightRef.current) sunLightRef.current.intensity = settings.lightIntensity;
     if (overlayMeshRef.current) overlayMeshRef.current.visible = settings.showDataLayer;
     if (overlayGridGroupRef.current) overlayGridGroupRef.current.visible = settings.showDataLayer;
-  }, [settings.wireframe, settings.showGrid, settings.lightIntensity, settings.showDataLayer]);
+    applyMoonTextureVisibility();
+  }, [settings.wireframe, settings.lightIntensity, settings.showDataLayer, settings.showMoonTexture]);
 
   // 自転角スライダー（settings.moonRotationDeg）を月本体の実際の回転に反映する。
   // 自動回転中は animate 側がこの値を進めつつ定期的に書き戻しているので、ここでの代入は
@@ -1144,14 +1161,14 @@ export const MoonViewer3D: React.FC<MoonViewer3DProps> = ({
         </button>
 
         <button
-          id="btn-toggle-grid"
-          onClick={() => onUpdateSettings({ showGrid: !settings.showGrid })}
-          title="緯度経度グリッド"
+          id="btn-toggle-moon-texture"
+          onClick={() => onUpdateSettings({ showMoonTexture: !settings.showMoonTexture })}
+          title={settings.showMoonTexture ? '月の実写画像を消す（データ層の色と紛れないように）' : '月の実写画像を表示する'}
           className={`p-2.5 rounded-xl text-xs flex items-center justify-center transition-all ${
-            settings.showGrid ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+            settings.showMoonTexture ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
           }`}
         >
-          <Layers className="w-4 h-4" />
+          <Image className="w-4 h-4" />
         </button>
 
         <button
