@@ -30,6 +30,22 @@ sys.path.insert(0, str(ROOT / "notebooks"))
 import moonkit as mk  # noqa: E402
 
 OUT = pathlib.Path(__file__).resolve().parent / "data"
+
+# 3コマ版（表計算・紙教材）だけで使う地域名の表示名。元の data/candidate_regions.csv（ノートブック版など
+# 広く使われる）は変えない。ここに「元の名前 → 3コマ版の表示名」を1つの対応表として置く。
+# 括弧書きがミッション（電波天文）と地域の対応をそのまま書いていたため、地理的な説明に替える。
+# env_grid.csv の region 列・candidate_regions.csv の name 列・表計算の C5 のプルダウン・紙教材の地域カードは
+# すべてこの表示名に統一する。
+DISPLAY_NAMES = {
+    "裏側・赤道（電波天文の候補域）": "裏側・赤道（月の裏側の赤道帯）",
+}
+
+
+def display_names(df: pd.DataFrame, col: str) -> pd.DataFrame:
+    """列 col の地域名を3コマ版の表示名に替える（対応表にない名前はそのまま）"""
+    df = df.copy()
+    df[col] = df[col].replace(DISPLAY_NAMES)
+    return df
 OUT.mkdir(exist_ok=True)
 LT = mk.LT_COLS
 
@@ -139,7 +155,7 @@ def env_grid(step_deg: float = 3.0) -> None:
                      "noon_sun_elev_deg", "earth_elev_deg"]].copy()
 
     # 候補地域タイプのラベルを付ける（region_type と同じ箱）
-    regions = pd.read_csv(mk._find("data", "candidate_regions.csv"))
+    regions = display_names(pd.read_csv(mk._find("data", "candidate_regions.csv")), "name")
     g["region"] = ""
     for _, r in regions.iterrows():
         m = g["lat"].between(r["lat_min"], r["lat_max"])
@@ -240,6 +256,11 @@ def reference() -> None:
 
 
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "regions":
+        # 地域名の表示名だけ作り直す（env_grid.csv と candidate_regions.csv のみ）
+        print("地域名の表示名を反映:")
+        env_grid()
+        return
     print("前処理データを作成:")
     temp_grid()
     craters_labeled()
