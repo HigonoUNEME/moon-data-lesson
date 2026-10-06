@@ -19,7 +19,7 @@ export const Header: React.FC = () => {
               月データでムーンベースの場所を決めよう
             </h1>
             <p className="text-[11px] text-slate-400 truncate">
-              3D月球儀でデータを見る入口ページ（公開準備中・最小版）
+              3D月球儀で月のデータを見て、場所ごとのちがいを読みとろう
             </p>
           </div>
         </div>
@@ -27,6 +27,10 @@ export const Header: React.FC = () => {
         <nav className="flex items-center gap-2 shrink-0">
           <a
             href="./data.html"
+            // 別タブで開く：同じタブだと月の向き・ピン・層の選択が消えるため
+            target="_blank"
+            rel="noopener noreferrer"
+            title="データ一覧（新しいタブで開きます）"
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold transition-colors"
           >
             <Table2 className="w-3.5 h-3.5" />

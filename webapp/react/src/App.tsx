@@ -22,7 +22,8 @@ export default function App() {
 
   const [settings, setSettings] = useState<MoonViewerSettings>({
     autoRotate: false,
-    rotationSpeed: 0.35,
+    // 授業で観察しやすい速さ（×1.0＝1周約60秒。以前は×0.35＝約170秒）
+    rotationSpeed: 1.0,
     wireframe: false,
     lightIntensity: 2.2,
     moonRotationDeg: 0,
@@ -30,7 +31,9 @@ export default function App() {
     // データ層は既定でオフ（まず月そのものを見せる）。「1日の温度」は重ねたときの既定の層として残す
     showDataLayer: false,
     dataLayerKey: 'diurnal_temp',
-    showMoonTexture: true
+    showMoonTexture: true,
+    // 地点名ヒント（既知地点の名前・カテゴリ）は既定でオフ。必要なときだけ画面のスイッチでオンにする
+    showFeatureHints: false
   });
 
   const handleUpdateSettings = useCallback((patch: Partial<MoonViewerSettings>) => {

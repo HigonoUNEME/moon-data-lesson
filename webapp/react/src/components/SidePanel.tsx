@@ -53,7 +53,7 @@ const NOTEBOOKS = [
   { path: 'explore.ipynb', label: '道具：自由探索ツール', hint: 'コードなしでデータ・軸・色を選んで散布図' },
   { path: 'explore_clustering.ipynb', label: '発展：クラスタリングで仲間分け', hint: '「周りと違う場所」を探す' },
   { path: 'explore_advanced.ipynb', label: '発展：クレーター数から絶対年代', hint: 'べき乗則フィットと参照表' },
-  { path: 'course_moonbase_polar.ipynb', label: 'ガイド型の分岐：南極を細かく見る', hint: '氷採掘・有人で南極を選んだ班だけ' },
+  { path: 'course_moonbase_polar.ipynb', label: 'ガイド型の分岐：南極を細かく見る', hint: '南極付近を、日照率・傾斜・永久影で見る' },
   { path: 'course_moonbase_ml.ipynb', label: '任意：機械学習でモデル比較', hint: '5モデルの決定境界・正解率' }
 ];
 

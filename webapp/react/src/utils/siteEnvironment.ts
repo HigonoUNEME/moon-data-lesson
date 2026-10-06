@@ -16,7 +16,7 @@ export interface SiteEnv {
   noonSun: number;      // 正午の太陽高度 [度]
   earthElev: number;    // 地球の仰角 [度]（正=表側 / 負=裏側）
   terrain: string;      // 海 / 陸
-  slopeDeg: number | null;  // 全球の傾斜 [度]（|緯度|≥85° は欠測）
+  slopeDeg: number | null;  // 全球の傾斜 [度]（元データのないセルは欠測。実際には緯度±88.5° のセルだけ）
   ageIndex: number | null;  // 相対地質年代 1(古)〜5(新)
   elevM: number;        // 標高 [m]（基準球 R=1737.4km からの高さ。マイナス＝低地）
 }
@@ -56,7 +56,7 @@ export function nearestEnv(lat: number, lon: number): SiteEnv | null {
 }
 
 export function earthSideLabel(earthElev: number): string {
-  if (earthElev > 10) return '表側（地球がよく見える／通信向き）';
-  if (earthElev < -10) return '裏側（地球が見えない／電波が静か・天文向き）';
+  if (earthElev > 10) return '表側（地球が地平線の上に見える）';
+  if (earthElev < -10) return '裏側（地球が地平線の下で見えない）';
   return '表裏の境（地球が地平線すれすれ）';
 }

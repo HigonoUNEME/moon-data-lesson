@@ -104,7 +104,7 @@ CATALOG = {
         "Fortezzo, C. M. ほか (2020), Unified Geologic Map of the Moon, USGS SIM 3316"),
     "landing_sites.csv": (
         "実在の月着陸地点・Artemis III 候補地・参照地形（29件）",
-        "Apollo・Luna・Surveyor・Chang'e・Chandrayaan-3 の着陸座標、Artemis III の南極候補地、Shackleton/Tycho/Copernicus など。"
+        "Apollo・Luna・Surveyor・Chang'e・Chandrayaan-3 の着陸座標、Artemis III の候補領域の座標、Shackleton/Tycho/Copernicus など。"
         "グリッドの分析結果を「実際の場所」に結びつけるための手キュレーション表。",
         "パブリックドメイン（NASA / USGS 座標）",
         "Wagner, R. V. ほか (2017), Coordinates of anthropogenic features on the Moon, Icarus 283 ／ NASA Artemis III candidate regions (2024)"),
@@ -122,20 +122,19 @@ CATALOG = {
         "Neukum, G., Ivanov, B. A., Hartmann, W. K. (2001), Space Science Reviews 96"),
     "site_environment.csv": (
         "月ぜんたいの環境指標（1度グリッド。海陸・温度・地球の見えかた）",
-        "南極以外の場所も同じ土俵で基地候補として評価できるようにした全球グリッド。区分（海／陸）・相対年代・"
+        "月全体を同じ尺度で比べられるようにした全球グリッド。区分（海／陸）・相対年代・"
         "1日の温度の最大/最小/差・夜の最低温度・正午の太陽高度・地球の仰角（正＝表側、負＝裏側）。"
         "既存の月データ（USGS 地質図・Diviner 温度）の結合と幾何計算だけで作った派生物（新規観測なし）。",
         "パブリックドメイン（USGS / NASA 由来）＋幾何計算",
         "moon_geology_grid.csv（USGS SIM 3316）＋ diviner_global/diviner_nighttime（UCLA Diviner）＋ 幾何計算。tools/build_site_environment.py"),
     "candidate_regions.csv": (
-        "基地の候補になる「地域タイプ」8件（緯度経度の箱つき）",
-        "赤道の海・中緯度の火砕丘・裏側（電波天文）・南極・溶岩チューブ天窓 など。site_environment を切り出して"
-        "目的別に評価するための手キュレーション表。それぞれ候補になる理由と弱点つき。",
+        "8つの地域の緯度経度の範囲",
+        "地域名と緯度経度の範囲（最小・最大）の表。site_environment から地域ごとに値を切り出すための手キュレーション表。",
         "パブリックドメイン（USGS 座標）＋各ミッション文献",
         "USGS / IAU Gazetteer ＋ 各ミッション・構想（Artemis III / LCRT / Chang'e 4,6 ほか）"),
     "lunar_pits.csv": (
         "溶岩チューブの天窓（縦孔）7件",
-        "地下空洞は放射線・微隕石・熱変動を遮蔽でき、長期滞在拠点の候補になる。Marius Hills・静かの海・"
+        "溶岩チューブの天井が崩れてできた縦孔。Marius Hills・静かの海・"
         "Mare Ingenii（裏側）など既知の縦孔の座標・開口径・深さ。座標は文献値を手キュレーション（全アトラスの再配布はしない）。",
         "座標は文献値（LROC 由来。実質パブリックドメイン）",
         "Wagner, R. V. & Robinson, M. S. (2014), Icarus 237 ／ Robinson, M. S. ほか (2012), Planet. Space Sci. 69 ／ Lunar Pit Atlas (LROC/ASU)"),

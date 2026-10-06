@@ -47,6 +47,12 @@ function nearestCurve(data: DiurnalLookupJson, lat: number, lon: number): number
   return best ? best.slice(2) : null;
 }
 
+/** lat, lon にいちばん近いセルの24時間カーブ（現地時間0〜23時の温度[K]）。
+ *  ピンカードの「24時間の最高・最低・差」用（自転の角度に関係なく、1日ぶんの全体を返す）。 */
+export function diurnalCurveAt(data: DiurnalLookupJson, lat: number, lon: number): number[] | null {
+  return nearestCurve(data, lat, lon);
+}
+
 /** lat, lon の地点で、太陽直下点の経度が subsolarLon のときの温度[K]。
  *  gen_diurnal_frames.py の位相補間（現地時間 = (12+(lon-太陽直下点経度)/15) mod 24 を
  *  整数時2点で線形補間）とまったく同じ式。 */

@@ -53,20 +53,19 @@ AGE_FINE_UPSCALE = 2  # 元データがすでに0.25度=1度グリッドの4倍�
 LAYERS = [
     # 温度系は「熱い=赤、冷たい=青」の直感に合わせて coolwarm（発散配色）にする。
     dict(key="temp_amp_K", label="1日の温度差", unit="K", cmap="coolwarm", vmin=None, vmax=None,
-         desc="いちばん暑い時刻といちばん寒い時刻の差。赤道で大きく、極で小さい。"),
+         desc="1日のうち、いちばん暑い時刻といちばん寒い時刻の温度の差（最高−最低）。"),
     dict(key="night_min_K", label="夜の最低温度", unit="K", cmap="coolwarm", vmin=None, vmax=None,
-         desc="夜がいちばん冷え込んだときの温度。低いほど、夜を越すのに熱が要る。"),
+         desc="夜のあいだにいちばん下がったときの温度。"),
     dict(key="noon_sun_elev_deg", label="正午の太陽高度", unit="°", cmap="viridis", vmin=0, vmax=90,
-         desc="正午に太陽がどれだけ高く昇るか（=90-|緯度|の近似）。発電量と熱負荷の代理。"),
+         desc="正午に太陽が地平線から何度の高さにあるか（=90-|緯度|の近似）。0〜90°。"),
     dict(key="earth_elev_deg", label="地球の仰角", unit="°", cmap="RdBu_r", vmin=-90, vmax=90,
-         desc="正＝表側（地球が見える・通信できる）、負＝裏側（地球が見えない・電波が静か）。"),
+         desc="月から見た地球の、地平線からの高さ（角度）。正＝地球が地平線の上にある（表側）、負＝地平線の下にある（裏側）。"),
     dict(key="slope_deg", label="全球の傾斜", unit="°", cmap="YlOrRd", vmin=0, vmax=20,
-         desc="地面の傾き。小さいほど平ら。|緯度|≥85°は透明（欠測。極は別データで見る）。"),
+         desc="地面の傾き。0°が水平で、大きいほど急。データのない極付近は透明（欠測）。"),
     dict(key="age_index", label="地質年代", unit="", cmap="cividis", vmin=1, vmax=5,
-         desc="USGS統合地質図の相対年代。1=最古、5=最新。海（新しい）と陸（古い）の違いが出る。"),
+         desc="USGS統合地質図の相対年代。1=最古、5=最新。"),
     dict(key="elev_m", label="標高", unit="m", cmap="terrain", vmin=None, vmax=None,
-         desc="基準球（半径1737.4km）からの高さ。低いほど青、高いほど白（地球の地形図と同じ配色）。"
-              "海（低地の玄武岩平原）と高地の違いがそのまま高さの違いとして見える。"),
+         desc="基準球（半径1737.4km）からの高さ。低いほど青、高いほど白（地球の地形図と同じ配色）。"),
 ]
 
 

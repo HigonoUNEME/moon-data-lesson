@@ -1,10 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { LunarFeature, MoonViewerSettings } from '../types';
 import { createProceduralMoonTextures, latLongToVector3, vector3ToLatLong } from '../utils/lunarTexture';
 import { staticLayerValueAt } from '../utils/dataLayerLookup';
-import { loadDiurnalLookup, diurnalValueAt } from '../utils/diurnalLookup';
+import { loadDiurnalLookup, diurnalValueAt, diurnalCurveAt } from '../utils/diurnalLookup';
+import { nearestEnv, SiteEnv } from '../utils/siteEnvironment';
 import overlayLayers from '../data/overlayLayers.generated.json';
 import diurnalFramesMeta from '../data/diurnalFrames.generated.json';
 import {
@@ -100,6 +101,51 @@ const CATEGORY_EMOJI: Record<string, string> = {
   moonquakes: '⚡ 月震・観測イベント',
   resources: '💧 極域資源・水氷候補'
 };
+
+/** ピンカードの「全指標の表」（W1）に出す行。key は DATA_LAYERS の key（名前・単位はそこから引く）、
+ *  field は siteEnvironment（3°グリッドの最近傍セル）のどの列か。順は授業（指導案）で読む順。 */
+const PIN_TABLE_ROWS: { key: string; field: keyof SiteEnv }[] = [
+  { key: 'temp_amp_K', field: 'tempAmp' },
+  { key: 'night_min_K', field: 'nightMin' },
+  { key: 'noon_sun_elev_deg', field: 'noonSun' },
+  { key: 'earth_elev_deg', field: 'earthElev' },
+  { key: 'slope_deg', field: 'slopeDeg' },
+  { key: 'age_index', field: 'ageIndex' },
+  { key: 'elev_m', field: 'elevM' }
+];
+
+/** 表の1行ぶんの値の文字列。温度は℃（toCelsiusDisplay）、欠測（元データのないセル。傾斜では緯度±88.5° のセル）は「―（欠測）」。 */
+function formatEnvValue(key: string, unit: string, v: number | null): string {
+  if (v === null || !Number.isFinite(v)) return '―（欠測）';
+  const disp = toCelsiusDisplay(key, unit, v);
+  if (key === 'earth_elev_deg') return `${v > 0 ? '+' : ''}${v.toFixed(1)}${disp.unit}`; // 正＝表側・負＝裏側
+  if (key === 'age_index') return v.toFixed(2);
+  if (key === 'elev_m') return `${v.toFixed(0)}${disp.unit}`;
+  return `${disp.value.toFixed(1)}${disp.unit}`;
+}
+
+// ピンカードの24時間の差が「1日の温度差」層の値とこれ以上ずれたら、注意書きを出す[K]
+const DIURNAL_MISMATCH_NOTE_K = 5;
+
+// 座標入力（W2）：値は3°グリッドのセル単位なので、入力値をセルの中心（…, -1.5, 1.5, 4.5, …）にそろえる。
+// 緯度のセル中心は -88.5〜88.5、経度は -178.5〜178.5（siteEnvironment.generated.json の step=3 と同じ）。
+const GRID_STEP_DEG = 3;
+const round1 = (x: number) => Math.round(x * 10) / 10;
+function snapToGridCenter(lat: number, lon: number): { lat: number; lon: number } {
+  const half = GRID_STEP_DEG / 2;
+  const latC = Math.min(90 - half, Math.max(-90 + half, Math.floor(lat / GRID_STEP_DEG) * GRID_STEP_DEG + half));
+  // 東経180°ちょうどは、西端（-180°）ではなく東端のセル（178.5°）に入れる（日付変更線のどちら側かをそろえる）
+  const lonN = lon === 180 ? 180 - 1e-9 : ((lon + 180) % 360 + 360) % 360 - 180;
+  const lonC = Math.floor(lonN / GRID_STEP_DEG) * GRID_STEP_DEG + half;
+  return { lat: round1(latC), lon: round1(lonC) };
+}
+
+/** 座標入力欄の文字列を数にする（全角数字・全角マイナスも受ける）。数として読めなければ null。 */
+function parseCoordInput(raw: string): number | null {
+  const s = raw.normalize('NFKC').replace(/[−‐‑–—ー]/g, '-').trim();
+  if (!/^[+-]?(\d+(\.\d*)?|\.\d+)$/.test(s)) return null;
+  return Number(s);
+}
 
 /** カーソルを合わせた地点の情報。常設ピンの代わりにホバーで出す（要望への対応）。 */
 interface HoverInfo {
@@ -235,6 +281,12 @@ export const MoonViewer3D: React.FC<MoonViewer3DProps> = ({
   // 自転してもピンを見失わないよう、カメラの向き（経度方向だけ）をピンに合わせ続けるか
   const [followPin, setFollowPin] = useState(false);
   followPinRef.current = followPin;
+  // 座標入力でピンを立てる欄（W2）の入力値とメッセージ
+  const [coordLat, setCoordLat] = useState('');
+  const [coordLon, setCoordLon] = useState('');
+  const [coordMsg, setCoordMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  // 「1日の温度」の値ルックアップの読み込みが終わったか（W4：ピンカードの24時間の最高・最低・差の再計算用）
+  const [diurnalReady, setDiurnalReady] = useState(false);
   // 左下の展開図に出す「今カメラが向いている地点」（月面ローカルの緯度経度）＋見えている範囲の半径
   // （limbDeg。カメラが有限距離にあるので、90°の半球まるごとではなく acos(R/カメラ距離) までしか
   // 実際には見えない。「青丸1点しか見えていないわけではない」という指摘への対応で、点ではなく
@@ -855,7 +907,7 @@ export const MoonViewer3D: React.FC<MoonViewer3DProps> = ({
     if (settings.dataLayerKey === DIURNAL_KEY) {
       setDiurnalLoading(true);
       // ホバー表示用の値ルックアップも同時に読みに行く（PNG24枚と同じく、この層を選んだときだけ）
-      loadDiurnalLookup().then((data) => { diurnalLookupRef.current = data; });
+      loadDiurnalLookup().then((data) => { diurnalLookupRef.current = data; setDiurnalReady(true); });
       Promise.all(DIURNAL.frames.map((f) => loadTexture(f.texture)))
         .then((textures) => {
           if (cancelled) return;
@@ -886,12 +938,20 @@ export const MoonViewer3D: React.FC<MoonViewer3DProps> = ({
   // moonSpinGroup の実際の回転角から直接おこなう（手動スライダー・自動回転のどちらでも
   // ズレない。上の useEffect は「初回ロード時の初期フレーム」だけを担当）。
 
+  /** 月面ローカルの緯度経度 (lat, lon) をカメラの正面に向ける目標をセットする（距離は dist）。
+   *  月本体は自転で回っているので、ローカルの向きを今の自転角ぶん回してから世界座標の方位に直す。 */
+  const focusOnLatLon = (lat: number, lon: number, dist: number) => {
+    const spinY = moonSpinGroupRef.current ? moonSpinGroupRef.current.rotation.y : 0;
+    const dir = latLongToVector3(lat, lon, 1).normalize().applyAxisAngle(Y_AXIS, spinY);
+    const sph = new THREE.Spherical().setFromVector3(dir);
+    focusRef.current = { az: sph.theta, pol: sph.phi, dist };
+  };
+
   // 選択地点が変わったら、その方向にカメラを寄せる目標をセット
   useEffect(() => {
     if (!selectedFeature) return;
-    const dir = latLongToVector3(selectedFeature.latitude, selectedFeature.longitude, 1).normalize();
-    const sph = new THREE.Spherical().setFromVector3(dir);
-    focusRef.current = { az: sph.theta, pol: sph.phi, dist: FOCUS_DISTANCE };
+    focusOnLatLon(selectedFeature.latitude, selectedFeature.longitude, FOCUS_DISTANCE);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFeature]);
 
   // 左下の展開図：カメラに今見えている範囲を淡く塗る（「シアンの点1つしか見えていないわけでは
@@ -968,7 +1028,48 @@ export const MoonViewer3D: React.FC<MoonViewer3DProps> = ({
   const clearPin = () => {
     if (pinMarkerRef.current) pinMarkerRef.current.visible = false;
     updatePinnedInfo(null);
+    setCoordMsg(null); // 「ピンを立てました」などの通知も消す
     setFollowPin(false); // ピンが無くなったら追従も解除
+  };
+
+  /** ピンを立てる共通処理（クリックと座標入力の両方から使う）。目印・カード・展開図が同じ情報から更新される。 */
+  const commitPin = (info: HoverInfo) => {
+    updatePinnedInfo(info);
+    placePinAt(info.lat, info.lon);
+  };
+
+  /** 座標入力（W2）：緯度・経度を読み、3°格子の中心にそろえてピンを立て、カメラをそこへ向ける。
+   *  空欄・数字でない・範囲外は、ピンを動かさずにメッセージを出す。 */
+  const placePinByCoord = () => {
+    if (coordLat.trim() === '' || coordLon.trim() === '') {
+      setCoordMsg({ kind: 'error', text: `${coordLat.trim() === '' ? '緯度' : '経度'}が空です。数字を入れてください。` });
+      return;
+    }
+    const lat = parseCoordInput(coordLat);
+    if (lat === null) { setCoordMsg({ kind: 'error', text: '緯度は数字で入れてください（例：-88.5）。' }); return; }
+    const lon = parseCoordInput(coordLon);
+    if (lon === null) { setCoordMsg({ kind: 'error', text: '経度は数字で入れてください（例：58.5）。' }); return; }
+    if (lat < -90 || lat > 90) { setCoordMsg({ kind: 'error', text: '緯度は -90〜90 の範囲で入れてください。' }); return; }
+    if (lon < -180 || lon > 180) { setCoordMsg({ kind: 'error', text: '経度は -180〜180 の範囲で入れてください（東経は＋、西経は−）。' }); return; }
+    const c = snapToGridCenter(lat, lon);
+    commitPin({
+      lat: c.lat,
+      lon: c.lon,
+      feature: nearestFeature(featuresRef.current, c.lat, c.lon),
+      layerValue: computeLayerValueAt(c.lat, c.lon)
+    });
+    // 地点名の自動寄せ（既知地点へのズーム）とは独立。今のズームの距離は変えず、向きだけ合わせる
+    const cam = cameraRef.current;
+    const ctl = controlsRef.current;
+    focusOnLatLon(c.lat, c.lon, cam && ctl ? cam.position.distanceTo(ctl.target) : START_DISTANCE);
+    setCoordLat(String(c.lat));
+    setCoordLon(String(c.lon));
+    setCoordMsg({
+      kind: 'ok',
+      text: c.lat === lat && c.lon === lon
+        ? `ピンを立てました（${c.lat}°, ${c.lon}°）。`
+        : `入力（${lat}°, ${lon}°）を3°格子の中心（${c.lat}°, ${c.lon}°）にそろえてピンを立てました。`
+    });
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -982,9 +1083,14 @@ export const MoonViewer3D: React.FC<MoonViewer3DProps> = ({
     if (!info) return;
     // クリックしてある地点にピンを立て、そこのデータを表示する（要望への対応）。
     // 既知の地点の近くなら、従来どおりその地点として選択しカメラも寄せる。
-    updatePinnedInfo(info);
-    placePinAt(info.lat, info.lon);
-    if (info.feature) onSelectFeature(info.feature);
+    commitPin(info);
+    // 座標欄とメッセージは直前の入力のまま残さず、いま立てたピンの値に合わせる（欄に値が入っていれば、
+    // そのまま「ピンを立てる」で3°格子の中心にそろえ直せる）
+    setCoordLat(String(info.lat));
+    setCoordLon(String(info.lon));
+    setCoordMsg(null);
+    // 地点名ヒントがオフの間は、既知地点へのカメラの自動ズームもしない（名前を手がかりにさせないため）
+    if (info.feature && settingsRef.current.showFeatureHints) onSelectFeature(info.feature);
   };
 
   const zoomBy = (factor: number) => {
@@ -1016,6 +1122,33 @@ export const MoonViewer3D: React.FC<MoonViewer3DProps> = ({
   const legendDesc = isDiurnal ? DIURNAL.desc : currentLayer?.desc ?? '';
   const legendSource = isDiurnal ? DIURNAL.source : currentLayer?.source ?? '';
   const legendGradient = isDiurnal ? DIURNAL.gradientCss : currentLayer?.gradientCss ?? '';
+
+  // ピンカード（W1）：ピンの地点の全指標。値は3°グリッドの最近傍セル（層の値・ホバーと同じ参照）。
+  // 層を切り替えても同じ表を出し続ける。
+  const pinnedEnv = useMemo(
+    () => (pinnedInfo ? nearestEnv(pinnedInfo.lat, pinnedInfo.lon) : null),
+    [pinnedInfo?.lat, pinnedInfo?.lon]
+  );
+  // ピンカード（W4）：「1日の温度」層がオンのときだけ、ピンの地点の24時間（現地時間0〜23時）の最高・最低・差。
+  // 自転の角度には依存しない（1日ぶんのカーブ全体から求める）。表示は℃（差は温度差なので単位だけ℃）。
+  const pinnedDiurnal = useMemo(() => {
+    if (!pinnedInfo || !settings.showDataLayer || settings.dataLayerKey !== DIURNAL_KEY) return null;
+    const lookup = diurnalLookupRef.current;
+    if (!lookup) return null;
+    const curve = diurnalCurveAt(lookup, pinnedInfo.lat, pinnedInfo.lon);
+    if (!curve || !curve.length) return null;
+    const hi = Math.max(...curve);
+    const lo = Math.min(...curve);
+    const diff = hi - lo;
+    // 「1日の温度差」層の値（別データ由来）との差。赤道帯では1 K未満だが、極付近では大きくずれる点がある
+    const layerDiff = pinnedEnv ? pinnedEnv.tempAmp : null;
+    return {
+      maxC: toCelsiusDisplay(DIURNAL_KEY, DIURNAL.unit, hi).value,
+      minC: toCelsiusDisplay(DIURNAL_KEY, DIURNAL.unit, lo).value,
+      diff,
+      mismatch: layerDiff !== null && Math.abs(diff - layerDiff) > DIURNAL_MISMATCH_NOTE_K ? layerDiff : null
+    };
+  }, [pinnedInfo?.lat, pinnedInfo?.lon, pinnedEnv, settings.showDataLayer, settings.dataLayerKey, diurnalReady]);
 
   return (
     <div
@@ -1052,7 +1185,7 @@ export const MoonViewer3D: React.FC<MoonViewer3DProps> = ({
               Lat: <strong className="text-white">{hoverInfo.lat > 0 ? `+${hoverInfo.lat}` : hoverInfo.lat}°</strong> |
               Lon: <strong className="text-white">{hoverInfo.lon > 0 ? `+${hoverInfo.lon}` : hoverInfo.lon}°</strong>
             </span>
-          ) : selectedFeature ? (
+          ) : selectedFeature && settings.showFeatureHints ? (
             <span>
               選択中: <strong className="text-white">{selectedFeature.nameJa}</strong>（{selectedFeature.latitude}°, {selectedFeature.longitude}°）
             </span>
@@ -1099,11 +1232,82 @@ export const MoonViewer3D: React.FC<MoonViewer3DProps> = ({
         </div>
       )}
 
-      {/* ピン留めした地点（クリックで設置。マウスを離しても消えない）。要望への対応 */}
+      {/* 座標を入力してピンを立てる（W2）＋地点名ヒントの切り替え（W3）。上部中央に1行で置く
+          （左の凡例・左下の展開図・右のピンカード・右下のボタンと重ならないように）。
+          入力値は3°格子の中心にそろえ、ピン・展開図・カードが同じ地点を指すようにする。 */}
+      <div className="absolute top-16 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 pointer-events-none max-w-[calc(100%-32px)]">
+        <div
+          id="coord-pin-card"
+          className="flex items-center gap-3 bg-slate-900/85 backdrop-blur-md border border-amber-500/30 px-3 py-1.5 rounded-xl shadow-xl text-xs text-slate-300 pointer-events-auto whitespace-nowrap"
+        >
+          <form
+            className="flex items-center gap-1.5"
+            onSubmit={(e) => { e.preventDefault(); placePinByCoord(); }}
+          >
+            <label className="flex items-center gap-1 text-[10px] text-slate-400">
+              緯度
+              <input
+                id="input-pin-lat"
+                type="text" inputMode="decimal" autoComplete="off" placeholder="-88.5"
+                value={coordLat}
+                onChange={(e) => setCoordLat(e.target.value)}
+                className="w-16 bg-slate-800 border border-slate-600 rounded-md px-1.5 py-0.5 text-[11px] font-mono text-slate-100"
+              />
+            </label>
+            <label className="flex items-center gap-1 text-[10px] text-slate-400">
+              経度
+              <input
+                id="input-pin-lon"
+                type="text" inputMode="decimal" autoComplete="off" placeholder="58.5"
+                value={coordLon}
+                onChange={(e) => setCoordLon(e.target.value)}
+                className="w-16 bg-slate-800 border border-slate-600 rounded-md px-1.5 py-0.5 text-[11px] font-mono text-slate-100"
+              />
+            </label>
+            <button
+              id="btn-place-pin"
+              type="submit"
+              title="入力した緯度・経度（3°格子の中心にそろえます）にピンを立て、そこへ月を向ける"
+              className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-200 border border-amber-500/40 hover:bg-amber-500/30 text-[11px] font-semibold"
+            >
+              ピンを立てる
+            </button>
+          </form>
+          <button
+            id="switch-feature-hints"
+            type="button"
+            role="switch"
+            aria-checked={settings.showFeatureHints}
+            onClick={() => onUpdateSettings({ showFeatureHints: !settings.showFeatureHints })}
+            title="既知の地点（クレーター・着陸地点など）の名前と種類を、ホバーとピンカードに出す。オンの間は、地点の近くをクリックするとカメラも寄る"
+            className="flex items-center gap-1.5 pl-3 border-l border-slate-700/70 text-[11px] text-slate-300"
+          >
+            <span>地点名ヒント</span>
+            <span className={`relative inline-block h-4 w-7 rounded-full transition-colors ${settings.showFeatureHints ? 'bg-cyan-500' : 'bg-slate-600'}`}>
+              <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${settings.showFeatureHints ? 'left-[14px]' : 'left-0.5'}`} />
+            </span>
+          </button>
+        </div>
+        {coordMsg && (
+          <p
+            id="coord-pin-message"
+            role={coordMsg.kind === 'error' ? 'alert' : 'status'}
+            className={`px-2.5 py-1 rounded-lg bg-slate-900/90 border text-[11px] leading-snug pointer-events-auto ${
+              coordMsg.kind === 'error' ? 'text-rose-300 border-rose-500/40' : 'text-emerald-300 border-emerald-500/30'
+            }`}
+          >
+            {coordMsg.text}
+          </p>
+        )}
+      </div>
+
+      {/* ピン留めした地点（クリックまたは座標入力で設置。マウスを離しても消えない）。要望への対応。
+          全指標の表で縦に長くなるため、右下のボタン列と重ならないよう、その左（right-20）に置く。
+          幅が狭い（約1100px未満）と上部中央の座標入力の帯と重なるので、その場合は帯とメッセージの下に下げる。 */}
       {pinnedInfo && (
         <div
           id="pinned-point-card"
-          className="absolute top-16 right-4 bg-slate-900/90 backdrop-blur-md border border-amber-500/40 px-3.5 py-2.5 rounded-2xl shadow-xl flex flex-col gap-1 text-xs text-slate-300 pointer-events-auto max-w-[230px]"
+          className="absolute top-16 max-[1099px]:top-[8.5rem] right-20 bg-slate-900/90 backdrop-blur-md border border-amber-500/40 px-3.5 py-2.5 rounded-2xl shadow-xl flex flex-col gap-1 text-xs text-slate-300 pointer-events-auto w-[250px]"
         >
           <div className="flex items-center justify-between gap-2">
             <span className="text-amber-300 font-semibold text-[11px]">📌 ピン留めした地点</span>
@@ -1131,7 +1335,7 @@ export const MoonViewer3D: React.FC<MoonViewer3DProps> = ({
               </button>
             </div>
           </div>
-          {pinnedInfo.feature && (
+          {pinnedInfo.feature && settings.showFeatureHints && (
             <div className="text-sm font-semibold text-slate-100">
               {CATEGORY_EMOJI[pinnedInfo.feature.category] ?? '📍'} {pinnedInfo.feature.nameJa}
             </div>
@@ -1142,6 +1346,49 @@ export const MoonViewer3D: React.FC<MoonViewer3DProps> = ({
           {pinnedInfo.layerValue && (
             <div className="text-xs text-rose-300 font-mono">
               {pinnedInfo.layerValue.label}: <strong>{pinnedInfo.layerValue.value.toFixed(1)}{pinnedInfo.layerValue.unit}</strong>
+            </div>
+          )}
+          {/* W4：「1日の温度」層のとき、この地点の24時間の最高・最低・差 */}
+          {pinnedDiurnal && (
+            <div id="pinned-diurnal-summary" className="text-xs text-rose-300 font-mono border-t border-slate-700/70 pt-1 mt-0.5">
+              <div className="text-[10px] text-slate-400">この地点の24時間（現地時間0〜23時）</div>
+              <div className="flex justify-between gap-2">
+                <span>最高 <strong>{pinnedDiurnal.maxC.toFixed(1)}℃</strong></span>
+                <span>最低 <strong>{pinnedDiurnal.minC.toFixed(1)}℃</strong></span>
+                <span>差 <strong>{pinnedDiurnal.diff.toFixed(1)}℃</strong></span>
+              </div>
+              {pinnedDiurnal.mismatch !== null && (
+                <div className="text-[10px] text-amber-300/90 font-sans leading-snug mt-0.5">
+                  ※「1日の温度差」層の値（{pinnedDiurnal.mismatch.toFixed(1)}℃）とずれています。極に近い地点では、2つのデータの違いが大きくなります。
+                </div>
+              )}
+            </div>
+          )}
+          {/* W1：同じ地点の全指標の表。どの層を選んでいても残る（選択中の層の行は色を付ける） */}
+          {pinnedEnv && (
+            <div id="pinned-env-table" className="border-t border-slate-700/70 pt-1 mt-0.5">
+              <table className="w-full text-[11px] leading-tight">
+                <tbody>
+                  {PIN_TABLE_ROWS.map((row) => {
+                    const layer = DATA_LAYERS.find((l) => l.key === row.key);
+                    const active = settings.showDataLayer && settings.dataLayerKey === row.key;
+                    const v = pinnedEnv[row.field];
+                    return (
+                      <tr key={row.key} data-layer-key={row.key} className={active ? 'text-rose-300' : 'text-slate-300'}>
+                        <th className="py-0.5 pr-2 text-left font-normal text-slate-400">
+                          {layer?.label ?? row.key}{row.key === 'age_index' ? '（1古〜5新）' : ''}
+                        </th>
+                        <td className="py-0.5 text-right font-mono">
+                          {formatEnvValue(row.key, layer?.unit ?? '', typeof v === 'number' ? v : null)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <div className="text-[10px] text-slate-500 leading-snug mt-0.5">
+                3°格子の最近傍セル（{pinnedEnv.lat}°, {pinnedEnv.lon}°）の値
+              </div>
             </div>
           )}
         </div>
@@ -1307,7 +1554,7 @@ export const MoonViewer3D: React.FC<MoonViewer3DProps> = ({
           style={{ left: `${tooltipPos.x + 14}px`, top: `${tooltipPos.y + 14}px`, position: 'fixed' }}
           className="z-50 pointer-events-none bg-slate-900/95 backdrop-blur-lg border border-cyan-500/40 p-3 rounded-xl shadow-2xl max-w-xs animate-in fade-in"
         >
-          {hoverInfo.feature && (
+          {hoverInfo.feature && settings.showFeatureHints && (
             <>
               <div className="text-[10px] uppercase font-bold tracking-wider text-cyan-400 mb-0.5">
                 {CATEGORY_EMOJI[hoverInfo.feature.category] ?? '📍'}
@@ -1323,7 +1570,7 @@ export const MoonViewer3D: React.FC<MoonViewer3DProps> = ({
               {hoverInfo.layerValue.label}: <strong>{hoverInfo.layerValue.value.toFixed(1)}{hoverInfo.layerValue.unit}</strong>
             </div>
           )}
-          {hoverInfo.feature && (
+          {hoverInfo.feature && settings.showFeatureHints && (
             <div className="text-[10px] text-cyan-300 font-medium mt-2">クリックで選択 →</div>
           )}
         </div>
