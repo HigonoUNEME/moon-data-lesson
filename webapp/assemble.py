@@ -156,7 +156,22 @@ def _fmt_bytes(n: int) -> str:
     return f"{x:.1f} MB"
 
 
+# 公開するデータ一覧・ダウンロード用の地域表は、名前と緯度経度の範囲（A〜E列）だけにする。
+# 理由・弱点の列（rationale・caveat）はミッションとの対応を書いた答えなので出さない。
+# 名前は3コマ版の表示名（course/build_course_data.py の DISPLAY_NAMES と同じ対応）にそろえる。
+PUBLIC_REGION_NAMES = {"裏側・赤道（電波天文の候補域）": "裏側・赤道（月の裏側の赤道帯）"}
+
+
+def _public_regions() -> list:
+    with open(ROOT / "data" / "candidate_regions.csv", "rt", encoding="utf-8-sig", newline="") as f:
+        rows = [r[:5] for r in csv.reader(f)]
+    return [rows[0]] + [[PUBLIC_REGION_NAMES.get(r[0], r[0])] + r[1:] for r in rows[1:]]
+
+
 def _preview_rows(path: pathlib.Path, gz: bool, n: int = 6):
+    if path.name == "candidate_regions.csv":
+        rows = _public_regions()
+        return rows[0], rows[1:1 + n]
     opener = gzip.open if gz else open
     with opener(path, "rt", encoding="utf-8", newline="") as f:
         r = csv.reader(f)
@@ -184,6 +199,9 @@ def write_data_catalog(content: pathlib.Path) -> None:
         size = srcfile.stat().st_size
         n_rows = sum(1 for _ in (gzip.open(srcfile, "rt", encoding="utf-8") if gz
                                  else open(srcfile, "rt", encoding="utf-8"))) - 1
+        if fname == "candidate_regions.csv":
+            n_rows = len(_public_regions()) - 1
+            size = len(chr(10).join(",".join(r) for r in _public_regions()).encode("utf-8"))
 
         # data.html はサイト直下、CSV 実体も /data/ に直接置く（JupyterLite に依存しない）
         dl = f'<a class="dl" href="./data/{fname}" download>{fname}（{_fmt_bytes(size)}）</a>'
@@ -217,6 +235,10 @@ def stage_downloads(dl_dir: pathlib.Path) -> None:
         shutil.rmtree(dl_dir)
     dl_dir.mkdir(parents=True)
     for name in DATA:
+        if name == "candidate_regions.csv":
+            with open(dl_dir / name, "w", encoding="utf-8", newline="") as fo:
+                csv.writer(fo).writerows(_public_regions())
+            continue
         shutil.copy2(ROOT / "data" / name, dl_dir / name)
         if name.endswith(".gz"):
             with gzip.open(ROOT / "data" / name, "rb") as fi, \
