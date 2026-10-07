@@ -15,7 +15,7 @@ Ver.1.9：ガイド型を表計算ベースに切り替える。表計算では�
   course/data/polar_south_sites.csv   南極の日照・永久影率・永久影までの距離・傾斜
   course/data/polar_north_sites.csv   北極（参考）
   course/data/geology_grid.csv        USGS 統合地質図（3度グリッド。海陸・相対年代の答え合わせ用）
-  course/data/env_grid.csv            月ぜんたいの環境指標（3度グリッド。日較差・夜の底・太陽高度・地球の仰角）＋地域タイプのラベル
+  course/data/env_grid.csv            月全体の環境指標（3度グリッド。日較差・夜の底・太陽高度・地球の仰角）＋地域タイプのラベル
   course/data/landing_sites.csv       実在の着陸地点＋その場所の温度・地質・傾斜
   course/data/reference.csv           海の面積割合など（円近似と USGS の両方）
 """

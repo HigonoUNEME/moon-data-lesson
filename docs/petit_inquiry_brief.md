@@ -41,7 +41,7 @@
 | `load('極域日照')` | 南極・北極の日照率・永久影率・傾斜（LOLA, 157,922地点） | `lat, lon, average_illumination_percent, permanent_shadow_fraction, slope_deg` |
 | `load('地質')` | 月全体の相対地質年代・海陸区分（USGS 統合地質図, 1度グリッド） | `lat, lon, relative_age, age_index`(1古〜5新)`, 区分`(海/陸) |
 | `load('着陸地点')` | 実在の着陸地点・Artemis III 候補地・参照地形（29件） | `name, kind, lat, lon, terrain, year, note` |
-| `load('環境')` | 月ぜんたい1度グリッドの環境指標（海陸・温度・地球の見えかた。南極以外も評価できる） | `lat, lon, 区分, age_index, temp_max_K, temp_min_K, temp_amp_K, night_min_K, noon_sun_elev_deg, earth_elev_deg`(正=表側/負=裏側) |
+| `load('環境')` | 月全体1度グリッドの環境指標（海陸・温度・地球の見えかた。南極以外も評価できる） | `lat, lon, 区分, age_index, temp_max_K, temp_min_K, temp_amp_K, night_min_K, noon_sun_elev_deg, earth_elev_deg`(正=表側/負=裏側) |
 | `load('地域')` | 候補地域タイプ8件（赤道の海・裏側・南極・溶岩チューブ…）と緯度経度の箱 | `name, lat_min, lat_max, lon_min, lon_max, rationale, caveat` |
 | `load('縦孔')` | 溶岩チューブの天窓7件（放射線・熱の遮蔽＝長期滞在の候補） | `name, lat, lon, host_terrain, opening_m, depth_m` |
 

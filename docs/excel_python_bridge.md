@@ -50,7 +50,7 @@ Python（moonkit）でも同じ手順で扱える」ことを売りにしてい�
 |---|---|---|---|
 | 1 温度 | `ステップ1_温度` | `region(load('温度'), lat=my_band)` → `diurnal_curve` → `daily_swing` → `summary` | `AVERAGEIFS` ⇔ `groupby().mean()` |
 | 2 海と陸 | `ステップ2_海と陸` | `near_maria(...)`, `summary_by(..., group='区分')`, `load('地質')` で答え合わせ | `COUNTIF`/`AVERAGEIF` ⇔ `groupby` |
-| 3 月ぜんたい | `ステップ3_月ぜんたい` | `env = load('環境')`, `scatter`, `region_type` の比較ループ | `AVERAGEIFS`（緯度帯）＋ `AVERAGEIF`（地域ラベル） ⇔ `between` / `region_type` |
+| 3 月全体 | `ステップ3_月全体` | `env = load('環境')`, `scatter`, `region_type` の比較ループ | `AVERAGEIFS`（緯度帯）＋ `AVERAGEIF`（地域ラベル） ⇔ `between` / `region_type` |
 | 4 地域を選ぶ | `ステップ4_地域を選ぶ` ＋ `データ_環境!O列` | `region_type(load('環境'), my_region)` → `site_score(region, want, top=10)` | `IF`＋重み付き和＋`LARGE`/`MATCH` ⇔ `site_score` |
 | 4b 南極（分岐） | `ステップ4b_南極`, `ステップ4b_スコア` ＋ `データ_南極` | 別ノートブック `course_moonbase_polar.ipynb`：`south_pole(load('極域日照'))`, `dist_to_permanent_shadow`, `site_score` | 同上（指標が日照率・傾斜・永久影距離に変わるだけ） |
 | 5 まとめ | `ステップ5_まとめ` | `nearest(env, lat, lon)` を実在計画ごとに | `INDEX`/`MATCH` ⇔ `nearest` |
