@@ -109,7 +109,15 @@ try {
                     $ch = $co.Chart
                     $series = @()
                     foreach ($sr in $ch.SeriesCollection()) { $series += ,@([string]$sr.Name, [string]$sr.Formula) }
-                    $o += ,@([string]$co.Name, [string]$co.TopLeftCell.Address(), [string]$co.BottomRightCell.Address(), [int]$ch.ChartType, $series)
+                    # 6th element: axis and title details (title text, legend, value-axis min/max, category label spacing)
+                    $ax = [ordered]@{}
+                    try { $ax["title"] = $(if ($ch.HasTitle) { [string]$ch.ChartTitle.Text } else { "" }) } catch {}
+                    try { $ax["legend"] = [bool]$ch.HasLegend } catch {}
+                    try { $va = $ch.Axes(2); $ax["y_min"] = $va.MinimumScale; $ax["y_max"] = $va.MaximumScale; $ax["y_major"] = $va.MajorUnit
+                          $ax["y_title"] = $(if ($va.HasTitle) { [string]$va.AxisTitle.Text } else { "" }) } catch {}
+                    try { $ca = $ch.Axes(1); $ax["x_label_spacing"] = $ca.TickLabelSpacing
+                          $ax["x_title"] = $(if ($ca.HasTitle) { [string]$ca.AxisTitle.Text } else { "" }) } catch {}
+                    $o += ,@([string]$co.Name, [string]$co.TopLeftCell.Address(), [string]$co.BottomRightCell.Address(), [int]$ch.ChartType, $series, $ax)
                 }
                 $result[[string]$s.key] = $o
             }
@@ -120,9 +128,22 @@ try {
                 $result[[string]$s.key] = $o
             }
             "exportpdf" {
-                # 指定シートだけ PDF に出す（見た目の確認用）
+                # export one sheet to PDF (for visual checks). Optional: area (print area, e.g. "A1:N40"), landscape, fit (1 = fit to one page)
                 $ws = $wb.Worksheets.Item([string]$s.sheet)
+                if ($s.area) { $ws.PageSetup.PrintArea = [string]$s.area }
+                if ($s.landscape) { $ws.PageSetup.Orientation = 2 }
+                if ($s.fit) { $ws.PageSetup.Zoom = $false; $ws.PageSetup.FitToPagesWide = 1; $ws.PageSetup.FitToPagesTall = 1 }
                 $ws.ExportAsFixedFormat(0, [string]$s.path)
+            }
+            "exportchart" {
+                # export each chart of a sheet to PNG as Excel draws it: <path>_<n>.png
+                $ws = $wb.Worksheets.Item([string]$s.sheet)
+                $n = 0
+                foreach ($co in $ws.ChartObjects()) {
+                    $n++
+                    $co.Chart.Export(([string]$s.path + "_" + $n + ".png"), "PNG") | Out-Null
+                }
+                $result[[string]$s.key] = $n
             }
             "saveas" {
                 $t = $sw.ElapsedMilliseconds

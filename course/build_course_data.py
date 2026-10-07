@@ -18,6 +18,8 @@ Ver.1.9：ガイド型を表計算ベースに切り替える。表計算では�
   course/data/env_grid.csv            月全体の環境指標（3度グリッド。日較差・夜の底・太陽高度・地球の仰角）＋地域タイプのラベル
   course/data/landing_sites.csv       実在の着陸地点＋その場所の温度・地質・傾斜
   course/data/reference.csv           海の面積割合など（円近似と USGS の両方）
+  course/data/temp_lat_rows.csv       |緯度|1度ごとの90行：日較差の平均と、最高が現地時間21〜3時に出るセルの割合（第2時 ステップ1・1b）
+  course/data/site_compare.csv        5つのクレーターの内部と同じ緯度の帯の24時間カーブ・夜の最低温度・帯の9割の幅（第2時 ステップ1c）
 """
 import pathlib
 import sys
@@ -255,11 +257,81 @@ def reference() -> None:
     _write(ref, "reference.csv")
 
 
+# --- 第2時（改訂設計 rev2）：緯度行・地点比較 ------------------------------------------------------
+NIGHT_WINDOW = (21, 3)    # 「夜」の窓＝現地時間21〜3時（太陽が地平線の下にある時間帯を傾き1.5°を考えても広く取れる窓）
+R_MOON_KM = 1737.4
+# 地点比較の5つのクレーター（位置・直径は data/craters_subset.csv の crater_id で引く）。先頭は教員の1例
+SITE_CRATERS = [
+    ("コペルニクス", "04-1-000623"),
+    ("ティコ", "05-1-000975"),
+    ("ラングレヌス", "07-1-000317"),
+    ("プトレマイオス", "05-1-000082"),
+    ("アルフォンスス", "05-1-000176"),
+]
+
+
+def temp_lat_rows() -> None:
+    """Diviner の全球0.5度グリッド（259,200セル）を |緯度| 1度ごとの90行にまとめる（北南を合わせる。各行2,880セル）。
+    swing_K = セルごとの1日の最高−最低（教材の t_swing_K と同じ定義）の平均。
+    night_peak_pct = 1日の最高温度が出る現地時間が21〜3時（pk>=21 or pk<=3）のセルの割合 [%]。"""
+    d = pd.read_csv(mk._find("data", "diviner_global.csv.gz"))
+    a = d[LT].values
+    swing = a.max(axis=1) - a.min(axis=1)
+    pk = a.argmax(axis=1)
+    night = ((pk >= NIGHT_WINDOW[0]) | (pk <= NIGHT_WINDOW[1])).astype(float)
+    lo = np.floor(d["lat"].abs().values).astype(int)
+    g = pd.DataFrame({"lo": lo, "swing": swing, "night": night}).groupby("lo").agg(
+        n_cells=("swing", "size"), swing_K=("swing", "mean"), night_peak_pct=("night", "mean"))
+    assert len(g) == 90 and (g["n_cells"] == 2880).all()
+    g = g.reset_index().rename(columns={"lo": "lat_lo"})
+    g["lat_hi"] = g["lat_lo"] + 1
+    g["swing_K"] = g["swing_K"].round(3)
+    g["night_peak_pct"] = (g["night_peak_pct"] * 100).round(3)
+    _write(g[["lat_lo", "lat_hi", "n_cells", "swing_K", "night_peak_pct"]], "temp_lat_rows.csv")
+
+
+def site_compare() -> None:
+    """5つのクレーターについて、内部（中心を囲む四角（半径の半分の長さ＋0.25度）の中の0.5度セル）と、同じ緯度の帯（緯度±1.5度で月を1周し、
+    経度が直径1つ分以上はなれたセル）の、24時間カーブの平均・夜の最低温度（セルごとの最低の平均）・
+    帯の最低温度の5％点と95％点を出す。"""
+    d = pd.read_csv(mk._find("data", "diviner_global.csv.gz"))
+    a = d[LT].values
+    tmin = a.min(axis=1)
+    cs = pd.read_csv(mk._find("data", "craters_subset.csv")).set_index("crater_id")
+    rows = []
+    for name, cid in SITE_CRATERS:
+        lat, lon, diam = (float(cs.loc[cid, c]) for c in ("lat", "lon", "diam_km"))
+        dl = np.degrees(diam / 2 * 0.5 / R_MOON_KM)
+        dlo = dl / np.cos(np.radians(lat))
+        inner = ((d["lat"] - lat).abs() <= dl + 0.25) & ((d["lon"] - lon).abs() <= dlo + 0.25)
+        dl2 = np.degrees(diam / R_MOON_KM) / np.cos(np.radians(lat))
+        band = ((d["lat"] - lat).abs() <= 1.5) & ((d["lon"] - lon).abs() > dl2)
+        i, b = inner.values, band.values
+        rec = dict(site_name=name, lat=round(lat, 2), lon=round(lon, 2), diam_km=round(diam, 1),
+                   n_inner=int(i.sum()), n_band=int(b.sum()))
+        for h, c in enumerate(LT):
+            rec[f"inner_{c}"] = round(float(a[i, h].mean()), 3)
+        for h, c in enumerate(LT):
+            rec[f"band_{c}"] = round(float(a[b, h].mean()), 3)
+        rec["inner_tmin"] = round(float(tmin[i].mean()), 4)
+        rec["band_tmin"] = round(float(tmin[b].mean()), 4)
+        rec["band_tmin_p5"] = round(float(np.percentile(tmin[b], 5)), 4)
+        rec["band_tmin_p95"] = round(float(np.percentile(tmin[b], 95)), 4)
+        rows.append(rec)
+    _write(pd.DataFrame(rows), "site_compare.csv")
+
+
 def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "regions":
         # 地域名の表示名だけ作り直す（env_grid.csv と candidate_regions.csv のみ）
         print("地域名の表示名を反映:")
         env_grid()
+        return
+    if len(sys.argv) > 1 and sys.argv[1] == "dai2ji":
+        # 第2時の新しい表2つだけ作り直す
+        print("第2時の表（緯度行・地点比較）:")
+        temp_lat_rows()
+        site_compare()
         return
     print("前処理データを作成:")
     temp_grid()
@@ -271,6 +343,8 @@ def main() -> None:
     env_grid()
     landing_sites_course()
     reference()
+    temp_lat_rows()
+    site_compare()
     print(f"-> {OUT}")
 
 

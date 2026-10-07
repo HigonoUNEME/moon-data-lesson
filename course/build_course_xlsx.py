@@ -27,6 +27,11 @@
   利用者名と保存先パスが xlsx に入るので、リポジトリに置く版では行わない。
   教員版は openpyxl 版のまま（教員が開いて使う。開くと再計算される）。
 
+第2時の再設計（docs/design_dai2ji_v2.md rev2。ステップ1の改修）:
+  ・新シート ステップ1b_帯を刻む（帯の幅 B6・線 B7。棒グラフ2つ）、ステップ1c_地点と帯（クレーター B5。折れ線1つ）
+  ・新データ表 データ_緯度行（90行）・データ_地点比較（5行）。学習者版でも見える。作り方は build_course_data.py
+  ・ステップ1の4バンドは データ_緯度行 から求める（295・279・234・156 K）。旧B（B17:B18・24時間カーブ）・旧C は残す
+
 v4.0 の改修（要件定義 A1〜A4）:
   A1 学習者版を同じスクリプトから生成（答えの除去・非表示・案内の書き換え）
   A2 入力検証（C5 のプルダウン、重みは 0〜5 の整数、状態表示セル）
@@ -55,6 +60,9 @@ import sys
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, LineChart, Reference
+from openpyxl.chart.data_source import NumFmt
+from openpyxl.chart.shapes import GraphicalProperties
+from openpyxl.drawing.line import LineProperties
 from openpyxl.formatting.rule import FormulaRule
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
@@ -82,6 +90,13 @@ WRAP = Alignment(wrap_text=True, vertical="top")
 TIE_EPS = "0.000000000001"   # 1E-12。順位用列で ROW() に掛ける（A3）
 REG_FAR_EQ = "裏側・赤道（月の裏側の赤道帯）"   # 3コマ版の表示名（build_course_data.py の DISPLAY_NAMES と同じ）
 N_REGIONS = 8                 # データ_地域 の行数（名前のプルダウンの範囲）
+
+# 第2時（改訂設計 rev2）の新シート
+S1B = "ステップ1b_帯を刻む"
+S1C = "ステップ1c_地点と帯"
+LR_HEADERS = ["lat_lo　緯度の絶対値の下 [°]", "lat_hi　緯度の絶対値の上 [°]", "n_cells　セル数（0.5°）",
+              "swing_K　1日の温度差（最高−最低）の平均 [K]",
+              "night_peak_pct　最高が21〜3時に出る地点の割合 [%]"]
 
 # 学習者版で非表示にするシート（名前は変えない。要件 §3.2）
 STUDENT_HIDDEN = ["ステップ3_月全体", "ステップ4b_南極", "ステップ5_まとめ",
@@ -119,7 +134,7 @@ def _text_width(s):
     return sum(1.9 if ord(ch) > 0x2E80 else 1.0 for ch in s)
 
 
-def _fit_notes(ws):
+def _fit_notes(ws, slack=0.92):
     """結合セルの注（_note）の行の高さを、折り返しに必要な行数で決め直す。
     列幅を決めた後に呼ぶ。もとの高さより低くはしない。"""
     for rng in ws.merged_cells.ranges:
@@ -134,7 +149,7 @@ def _fit_notes(ws):
             total += w if w else 8.43
         lines = 0
         for part in cell.value.split("\n"):
-            lines += max(1, math.ceil(_text_width(part) / (total * 0.92)))
+            lines += max(1, math.ceil(_text_width(part) / (total * slack)))
         h = 14 * lines + 2
         cur = ws.row_dimensions[rng.min_row].height or 0
         if h > cur:
@@ -183,6 +198,288 @@ def _status_format(ws, cell):
         formula=[f'LEFT({cell},2)="南極"'], fill=amber, font=Font(color="9C5700", bold=True)))
 
 
+# ----- 第2時（改訂設計 rev2）の新シート：ステップ1b・ステップ1c --------------------------------------
+GREY_FILL = PatternFill("solid", bgColor="E4E4E4", fgColor="E4E4E4")
+TEACHER_RED = Font(name="Yu Gothic", size=10, bold=True, color="A93226")
+HEAD_FILL = PatternFill("solid", fgColor="EEF1F6")
+
+
+def _line_expect(lr_df, line):
+    """線（|緯度|の上限）の内側で、最高が21〜3時に来る割合の最大 [%] と、使えなくなる月の面積 [%]（式は B9・B10 と同じ）"""
+    inside = lr_df[lr_df["lat_hi"] <= line]
+    mx = float(inside["night_peak_pct"].max())
+    area = (1 - math.sin(math.radians(line))) * 100
+    return round(mx, 1), round(area, 1)
+
+
+def _memo(ws, lines, row, span=5):
+    """教員用メモ（教員版だけ）。1行ずつ結合セルで書く"""
+    ws.cell(row=row, column=1, value="【教員用メモ】生徒には配らない（学習者版には出ない）").font = TEACHER_RED
+    row += 1
+    for t in lines:
+        _note(ws, t, row, span=span)
+        row += 1
+    _fit_notes(ws, 0.62)       # 列幅が決まった後で、メモの行の高さを折り返しに合わせる
+    return row
+
+
+def _tidy_axes(chart, y_fmt):
+    """軸タイトル・凡例が目盛や軸に重ならないようにし、目盛の書式（整数）と薄い補助線にそろえる"""
+    for ax in (chart.x_axis, chart.y_axis):
+        if ax.title is not None:
+            ax.title.overlay = False
+    if chart.legend is not None:
+        chart.legend.overlay = False
+    chart.y_axis.numFmt = NumFmt(formatCode=y_fmt, sourceLinked=False)
+    chart.y_axis.majorGridlines.spPr = GraphicalProperties(ln=LineProperties(solidFill="D9D9D9", w=9525))
+
+
+def _head_cells(ws, row, col0, heads, height):
+    for i, h in enumerate(heads):
+        cell = ws.cell(row=row, column=col0 + i, value=h)
+        cell.font = BOLD
+        cell.fill = HEAD_FILL
+        cell.alignment = Alignment(wrap_text=True, vertical="center")
+    ws.row_dimensions[row].height = height
+
+
+def build_step1b(wb, student, lr_df, LR):
+    """第2時 判断①：緯度の帯の幅（30・5・1°）を黄色セルで変えて、日較差と『最高が21〜3時に来る割合』の棒グラフを描き直す。
+    もう1つの黄色セル＝線（使う緯度の上限）。画面に出す数字は2つだけ（線の内側の最大・使えなくなる月の面積）。合否は出さない。"""
+    ws = wb.create_sheet(S1B)
+    _title(ws, "ステップ1b：緯度の帯を刻んで、使う緯度の上限（線）を引く")
+    _note(ws, "『データ_緯度行』は、月全体の0.5度のセル（259,200個）を、緯度の絶対値1度ごとの90行にまとめた表。"
+              "各行に、1日の温度差（最高−最低）の平均と、1日のうち最高の温度が出る時刻が現地時間の21〜3時になるセルの割合［％］が入っている。"
+              "月には大気がなく、地面をあたためるのは太陽だけ。"
+              "黄色いセルで帯の幅を変えると、下の表と2つのグラフが、帯ごとの平均で描き直される（各行には、その行が入る帯の平均が入る）。",
+          3, span=5)
+    _h2(ws, "A. 帯の幅と線（黄色いセルを変える）", 5)
+    ws["A6"] = "帯の幅 [°]（30・5・1 から選ぶ）"
+    ws["A7"] = "使う緯度の上限（線）[°]（50〜90 の整数）"
+    _note(ws, "B9 は、『データ_緯度行』の1°ごとの行の値から求める。帯の幅を 30 にするとグラフは30°ぶんの平均になって棒が小さく見え、"
+              "幅を 1 にすると、グラフの棒が B9 と同じ1°ごとの値になる。", 8, span=5)
+    ws["A9"] = "線の内側で、最高が21〜3時に来る割合の最大 [%]"
+    ws["A10"] = "使えなくなる月の面積 [%]"
+    for r in (6, 7, 9, 10):
+        ws[f"A{r}"].font = BODY
+        ws[f"A{r}"].alignment = Alignment(wrap_text=True, vertical="center")
+    _input(ws, "B6", 30)
+    _input(ws, "B7", 90)
+    dv = DataValidation(type="list", formula1='"30,5,1"', allow_blank=False, showErrorMessage=True,
+                        showInputMessage=True, errorStyle="stop",
+                        errorTitle="帯の幅", error="帯の幅は 30・5・1 のどれかを、一覧から選んでください。",
+                        promptTitle="帯の幅 [°]", prompt="30・5・1 から選ぶ")
+    ws.add_data_validation(dv)
+    dv.add("B6")
+    dv2 = DataValidation(type="whole", operator="between", formula1="50", formula2="90",
+                         allow_blank=False, showErrorMessage=True, showInputMessage=True, errorStyle="stop",
+                         errorTitle="線の入れかた", error="線は 50〜90 の整数（緯度の絶対値 [°]）で入れてください。",
+                         promptTitle="線 [°]", prompt="50〜90 の整数。この緯度の絶対値までを使う")
+    ws.add_data_validation(dv2)
+    dv2.add("B7")
+    ok_line = "AND(ISNUMBER($B$7),$B$7>=50,$B$7<=90,$B$7=INT($B$7))"
+    ws["B9"] = f'=IF({ok_line},ROUND(SUMPRODUCT(MAX(({LR("B")}<=$B$7)*{LR("E")})),1),"")'
+    ws["B10"] = f'=IF({ok_line},ROUND((1-SIN(RADIANS($B$7)))*100,1),"")'
+    for c in ("B9", "B10"):
+        ws[c].font = Font(name="Yu Gothic", size=12, bold=True, color="1A6FB0")
+        ws[c].number_format = "0.0"
+    ws["A11"] = (
+        '=IFERROR(IF(AND($B$6<>30,$B$6<>5,$B$6<>1),"【注意】帯の幅は 30・5・1 のどれかにしてください",'
+        f'IF(NOT({ok_line}),"【注意】線は 50〜90 の整数で入れてください",'
+        '"OK　帯の幅 "&$B$6&"°　線 "&$B$7&"°")),"【注意】黄色いセルに数字以外が入っています")')
+    ws["A11"].font = BOLD
+    _status_format(ws, "A11")
+    _note(ws, "気づき：帯の幅を 30 → 5 → 1 と変えると、2つのグラフはどう変わる？　"
+              "線（使う緯度の上限）を何度に引く？　B9 と B10 の2つの数字を紙に書く。"
+              "表の灰色の行は、線の外側。", 12, span=5)
+
+    # 表：90行（緯度の絶対値の下を1度ずつ）。各行に、その行が入る帯の平均
+    H0 = 14
+    _head_cells(ws, H0, 1, ["緯度の絶対値の下 [°]", "1日の温度差の平均 [K]（帯の平均）",
+                            "最高が21〜3時に出る地点の割合 [%]（帯の平均）", "帯の下 [°]", "帯の上 [°]"], 44)
+    r0, r1 = H0 + 1, H0 + 90
+    for i in range(90):
+        r = r0 + i
+        ws[f"A{r}"] = f"=データ_緯度行!A{i + 2}"
+        ws[f"D{r}"] = f"=INT(A{r}/$B$6)*$B$6"
+        ws[f"E{r}"] = f"=D{r}+$B$6"
+        ws[f"B{r}"] = f'=AVERAGEIFS({LR("D")},{LR("A")},">="&D{r},{LR("B")},"<="&E{r})'
+        ws[f"C{r}"] = f'=AVERAGEIFS({LR("E")},{LR("A")},">="&D{r},{LR("B")},"<="&E{r})'
+        ws[f"B{r}"].number_format = "0.0"
+        ws[f"C{r}"].number_format = "0.0"
+        for c in "ABCDE":
+            ws[f"{c}{r}"].font = BLUE if c in "BC" else BODY
+    ws.conditional_formatting.add(
+        f"A{r0}:E{r1}", FormulaRule(formula=[f"AND(ISNUMBER($B$7),$A{r0}+1>$B$7)"], fill=GREY_FILL,
+                                    font=Font(color="888888")))
+
+    def bar_chart(title, ycol, ytitle, ymax, major, color, anchor):
+        bar = BarChart()
+        bar.type = "col"
+        bar.title = title
+        bar.y_axis.title = ytitle
+        bar.x_axis.title = "緯度の絶対値 [度]（0 が赤道、90 が極）"
+        bar.add_data(Reference(ws, min_col=ycol, min_row=H0, max_row=r1), titles_from_data=True)
+        bar.set_categories(Reference(ws, min_col=1, min_row=r0, max_row=r1))
+        bar.height, bar.width = 7.2, 16
+        bar.x_axis.delete = False
+        bar.y_axis.delete = False
+        bar.legend = None
+        bar.title.overlay = False
+        bar.varyColors = False
+        bar.gapWidth = 0
+        bar.y_axis.scaling.min = 0
+        bar.y_axis.scaling.max = ymax
+        bar.y_axis.majorUnit = major
+        bar.x_axis.tickLblSkip = 10
+        bar.x_axis.tickMarkSkip = 10
+        bar.series[0].graphicalProperties.solidFill = color
+        bar.series[0].graphicalProperties.line.solidFill = color
+        _tidy_axes(bar, "0")
+        ws.add_chart(bar, anchor)
+
+    # 追加の順（日較差→割合）は変えず、置く位置だけ入れ替える：B6・B7 を変えながら見る「割合」を最初の画面（G5）に、日較差を下（G15）に
+    bar_chart("1日の温度差（最高−最低）の平均 [K]", 2, "温度差 [K]", 300, 50, "1A6FB0", "G15")
+    bar_chart("最高が21〜3時に出る地点の割合 [%]", 3, "割合 [%]", 8, 2, "D9622B", "G5")
+
+    ws.column_dimensions["A"].width = 30
+    ws.column_dimensions["B"].width = 22
+    ws.column_dimensions["C"].width = 24
+    ws.column_dimensions["D"].width = 10
+    ws.column_dimensions["E"].width = 10
+    ws.column_dimensions["F"].width = 3
+    for r in (6, 7, 9, 10):
+        ws.row_dimensions[r].height = 30
+    _fit_notes(ws, 0.72)
+
+    if not student:
+        ws["A13"] = f"【教員用】想定値と問い返しの基準は {r1 + 2} 行目から。"
+        ws["A13"].font = TEACHER_RED
+        rows = lr_df.set_index("lat_lo")
+        seg = "、".join(f"{lo}〜{lo + 1}°＝{rows.loc[lo, 'night_peak_pct']:.1f}％（日較差 {rows.loc[lo, 'swing_K']:.1f} K）"
+                        for lo in range(84, 90))
+        lines = []
+        for ln in (70, 80, 85, 86, 87, 88):
+            mx, ar = _line_expect(lr_df, ln)
+            lines.append(f"線{ln}° → 内側の最大 {mx}％、使えなくなる面積 {ar}％")
+        memo = [
+            "最高が21〜3時に来る割合（|緯度|の行ごと。北南を合わせる）：" + seg + "。"
+            "60°未満〜84°の行は 0.0％。帯の幅を 30 → 5 → 1 と刻むと、帯の最大が 0.6％ → 3.4％ → 6.8％ と見えてくる。",
+            "線を入れたときの想定値（内側＝行の上端が線以下）：" + "；".join(lines) + "。",
+            "問い返しの基準：線が60°以下なら『60〜84°の行は割合が 0.0％。なぜ捨てる？　線70°だと月の何％が使えなくなる？（6.0％）』。"
+            "線が88°以上なら『86〜87°で 6.8％、87〜88°で 4.2％ある。内側に入れて大丈夫？』。"
+            "85〜87°の線は『1.0％と 6.8％の間で、どこから使わない？』と数字を指す。許容は決めない。",
+            "窓（21〜3時）の根拠：自転軸の傾き（約1.5°。一般に知られた値で、同梱データでは未確認）を考えても、21〜3時は"
+            "|緯度|約87.8°までなら夏でも太陽が地平線の下にある時間帯。88°以上の行は割合の意味が変わる。89°行で割合が下がるのは回復ではない（日較差も下げ止まっている）。",
+            "教員の一言の要点：夜に最高が出るのは、平らな地面の考え方では説明できない。斜面の向きかもしれないし、データの作り方かもしれない。"
+            "今日はどちらかを調べない。『緯度だけで場所を代表させる見方』をどこまで使うかを決める。",
+            "旧デモ（ステップ1の B17・B18 に -86.75・0.25 を入れる）で24時間カーブを見せたら、0.25 に戻す。",
+        ]
+        _memo(ws, memo, r1 + 2)
+    return ws
+
+
+def build_step1c(wb, student, sc_df):
+    """第2時 判断②：担当クレーターの内部と、同じ緯度の帯（月を1周）の24時間カーブ・夜の最低温度を比べる。判定は自動表示しない。"""
+    ws = wb.create_sheet(S1C)
+    _title(ws, "ステップ1c：クレーターの内部と、同じ緯度の帯を比べる")
+    _note(ws, "『データ_地点比較』には、5つのクレーターについて、クレーターの内部と、同じ緯度の帯の、24時間の温度カーブ（セルの平均）と夜の最低温度が入っている。"
+              "内部＝クレーターの中心を囲む四角の中にある0.5度のセル（四角は、中心から南北・東西に、半径の半分の長さ＋0.25度の範囲。東西の長さは緯度に合わせて補正）。"
+              "帯＝クレーターと同じ緯度（±1.5度）を、月を1周したもの（クレーターから経度が直径1つ分以上はなれたセルだけ）。"
+              "担当のクレーターを黄色いセル B5 の一覧から選ぶ。", 3, span=5)
+    ws["A5"] = "担当のクレーター（B5 の一覧から選ぶ）"
+    ws["A5"].font = BODY
+    ws["A5"].alignment = Alignment(wrap_text=True, vertical="center")
+    ws.row_dimensions[5].height = 30
+    _input(ws, "B5", None if student else "コペルニクス")
+    dv = DataValidation(type="list", formula1="SiteNames", allow_blank=True, showErrorMessage=True,
+                        showInputMessage=True, errorStyle="stop",
+                        errorTitle="クレーター名が違います", error="『データ_地点比較』にある名前を、一覧から選んでください。",
+                        promptTitle="担当のクレーター", prompt="クリックして、一覧から1つ選ぶ")
+    ws.add_data_validation(dv)
+    dv.add("B5")
+    M = 'MATCH($B$5,データ_地点比較!$A$2:$A$6,0)'
+    ws["A6"] = (
+        '=IFERROR(IF($B$5="","担当のクレーターを選んでください（B5 をクリックすると一覧が出ます）",'
+        'IF(COUNTIF(SiteNames,$B$5)=0,"【注意】B5 の名前が『データ_地点比較』にありません。一覧から選んでください",'
+        f'"OK　"&$B$5&"：内部 "&INDEX(データ_地点比較!$E$2:$E$6,{M})&" セル、帯 "&INDEX(データ_地点比較!$F$2:$F$6,{M})&" セル")),'
+        '"【注意】B5 の名前を確かめてください")')
+    ws["A6"].font = BOLD
+    _status_format(ws, "A6")
+
+    _h2(ws, "A. 夜の最低温度 [K]（セルごとの1日の最低温度の平均）", 8)
+    _head_cells(ws, 9, 2, ["クレーターの内部", "同じ緯度の帯の平均", "帯の9割が入る範囲：下端", "帯の9割が入る範囲：上端"], 44)
+    ws["A10"] = "夜の最低温度 [K]"
+    ws["A10"].font = BOLD
+    for c, col in zip("BCDE", ("BC", "BD", "BE", "BF")):
+        ws[f"{c}10"] = (f'=IF($B$5="","",IFERROR(ROUND(INDEX(データ_地点比較!${col}$2:${col}$6,{M}),1),""))')
+        ws[f"{c}10"].font = Font(name="Yu Gothic", size=12, bold=True, color="1A6FB0")
+        ws[f"{c}10"].number_format = "0.0"
+    _note(ws, "比べ方：クレーターの内部の夜の最低温度が、『帯の9割が入る範囲』（帯の中のセルの9割が、この下端と上端の間に入る）の内側か外側かを見る。"
+              "紙には、内部の値と、帯の9割が入る範囲の2つの数字を書く。", 11, span=5)
+
+    _h2(ws, "B. 24時間の温度カーブ（現地時間。セルの平均）", 13)
+    _head_cells(ws, 14, 1, ["現地時間", "クレーター内部の平均 [K]", "同じ緯度の帯の平均 [K]"], 30)
+    for h in range(24):
+        r = 15 + h
+        ws[f"A{r}"] = h
+        ws[f"A{r}"].font = BODY
+        for c, base in (("B", 7), ("C", 31)):     # inner_t_lt00 は G 列（7）、band_t_lt00 は AE 列（31）
+            col = get_column_letter(base + h)
+            ws[f"{c}{r}"] = (f'=IF($B$5="",NA(),IFERROR(INDEX(データ_地点比較!${col}$2:${col}$6,{M}),NA()))')
+            ws[f"{c}{r}"].number_format = "0.0"
+            ws[f"{c}{r}"].font = BLUE
+    ws.conditional_formatting.add("B15:C38", FormulaRule(formula=["ISNA(B15)"], font=Font(color="FFFFFF")))
+    line = LineChart()
+    line.title = "1日の温度カーブ：クレーター内部と、同じ緯度の帯"
+    line.y_axis.title = "温度 [K]"
+    line.x_axis.title = "現地時間"
+    line.add_data(Reference(ws, min_col=2, max_col=3, min_row=14, max_row=38), titles_from_data=True)
+    line.set_categories(Reference(ws, min_col=1, min_row=15, max_row=38))
+    line.height, line.width = 8.5, 16
+    line.x_axis.delete = False
+    line.y_axis.delete = False
+    line.legend.position = "b"
+    line.title.overlay = False
+    line.varyColors = False
+    for sr, color, wd in zip(line.series, ("D9622B", "1A6FB0"), (28000, 22000)):
+        sr.smooth = False
+        sr.graphicalProperties.line.solidFill = color
+        sr.graphicalProperties.line.width = wd
+        sr.marker.symbol = "none"
+    _tidy_axes(line, "0")
+    ws.add_chart(line, "E13")
+    _note(ws, "注：A の夜の最低温度は、セルごとの最低温度の平均。B のカーブはセルの平均なので、カーブの最低は A と少しちがう。"
+              "朝と夕方の温度が急に変わる時間帯（6〜7時・17〜18時ごろ）は、同じ緯度の帯の中でも場所による差が大きい。夜と昼の平らな部分を見る。", 40, span=5)
+
+    ws.column_dimensions["A"].width = 34
+    for c in "BCDE":
+        ws.column_dimensions[c].width = 22
+    _fit_notes(ws, 0.72)
+
+    if not student:
+        sc = sc_df.set_index("site_name")
+        rows = []
+        for nm in sc.index:
+            s_ = sc.loc[nm]
+            d_ = s_["inner_tmin"] - s_["band_tmin"]
+            rows.append(f"{nm}：内部 {s_['inner_tmin']:.1f}、帯の平均 {s_['band_tmin']:.1f}、差 {d_:+.1f}、"
+                        f"帯の9割 {s_['band_tmin_p5']:.1f}〜{s_['band_tmin_p95']:.1f}（内部−上端 {s_['inner_tmin'] - s_['band_tmin_p95']:+.1f}）"
+                        f"［内部 {int(s_['n_inner'])} セル・帯 {int(s_['n_band'])} セル］")
+        memo = [
+            "想定値（夜の最低温度 [K]）。" + "　".join(rows),
+            "全体の比率（教員が別に数えた値。この表計算では再計算しない）：直径60〜200 km・|緯度|55°未満のクレーター778個のうち、帯との差が＋3 K以上は12個（約1.5％）。"
+            "教員が選んだ5つのうち2つはその上位に入る。『クレーターは違うもの』という規則ではなく、例外を探す練習として扱う。",
+            "教員の1例＝コペルニクス（担当にしない）。担当は4クレーター。違う側（ティコ・ラングレヌス）を担当する班は全班の30％以下にする。",
+            "ラングレヌス班の見取り：『帯の9割が入る範囲の上端との差が小さい。何Kなら違うと言う？』と問い返す。",
+            "ステップ1の旧デモ（B17・B18 に 9.25・-20.75）はコペルニクス内部の1セルで、夜の最低は 102.8 K。内部平均 103.4 K と少し違う（3度標本の1セル）。"
+            "『データ_着陸地点』のコペルニクス・ティコは1点の値で、ここの内部平均とは別の数字。",
+            "朝夕（6〜7時・17〜18時）の差は原因を調べていない。『夜と昼の平らな部分を見よう』とだけ言う。",
+        ]
+        _memo(ws, memo, 43)
+    return ws
+
+
 def build(student: bool = False):
     out = OUT_STUDENT if student else OUT_TEACHER
     out.parent.mkdir(exist_ok=True)
@@ -199,6 +496,13 @@ def build(student: bool = False):
     _, a_df = add_data_sheet(wb, "crater_ages_labeled.csv", "データ_クレーター年代")
     ps_ws, ps_df = add_data_sheet(wb, "polar_south_sites.csv", "データ_南極")
     add_data_sheet(wb, "polar_north_sites.csv", "データ_北極")
+    lr_ws, lr_df = add_data_sheet(wb, "temp_lat_rows.csv", "データ_緯度行")      # 第2時（ステップ1・1b）。学習者版でも見える
+    _, sc_df = add_data_sheet(wb, "site_compare.csv", "データ_地点比較")        # 第2時（ステップ1c）。学習者版でも見える
+    assert len(lr_df) == 90 and len(sc_df) == 5
+    for col, head in enumerate(LR_HEADERS, start=1):     # 見出しに単位・窓を書く（判断や原因の語は入れない）
+        lr_ws.cell(row=1, column=col, value=head)
+    for col, w in zip("ABCDE", (22, 22, 12, 20, 40)):
+        lr_ws.column_dimensions[col].width = w
     _, g_df = add_data_sheet(wb, "geology_grid.csv", "データ_地質")
     env_ws, env_df = add_data_sheet(wb, "env_grid.csv", "データ_環境")
     _, reg_df = add_data_sheet(wb, "candidate_regions.csv", "データ_地域", student)
@@ -221,6 +525,11 @@ def build(student: bool = False):
     # 地域名のプルダウン用の名前（データ_地域 の A 列）
     wb.defined_names["RegionNames"] = DefinedName(
         "RegionNames", attr_text=f"データ_地域!$A$2:$A${REG_N}")
+    # クレーター名のプルダウン用の名前（データ_地点比較 の A 列。ステップ1c の B5）
+    wb.defined_names["SiteNames"] = DefinedName(
+        "SiteNames", attr_text=f"データ_地点比較!$A$2:$A${len(sc_df) + 1}")
+    LR_N = len(lr_df) + 1      # データ_緯度行 の最終行（91）
+    LR = lambda col: f"データ_緯度行!${col}$2:${col}${LR_N}"
 
     # データ_環境 の列: A lat B lon C 区分 D age_index E temp_amp_K F night_min_K
     #   G noon_sun_elev_deg H earth_elev_deg I region
@@ -272,7 +581,9 @@ def build(student: bool = False):
                   "⑤ このファイルは上書き保存しない（閉じるときは『保存しない』）", 6)
         _h2(ws, "2. 使うシート", 12)
         for i, (nm, desc) in enumerate([
-            ("ステップ1_温度", "（第2時）月の1日の温度は緯度でどう変わる？ どこまで信じられる？"),
+            ("ステップ1_温度", "（第2時）月の1日の温度は緯度でどう変わる？ 緯度の平均を、どこまで使う？"),
+            (S1B, "（第2時）緯度の帯の幅を変えて、グラフを見て、使う緯度の上限（線）を決める"),
+            (S1C, "（第2時）担当のクレーターの内部と、同じ緯度の帯の温度を比べる"),
             ("ステップ2_海と陸", "（第2時）『海』と『陸』でクレーターの数（密度）はどう違う？ 地質図と合っている？"),
             ("ステップ4_地域を選ぶ", "（第2時の終わり・第3時）地域タイプを選び、5つの指標に重みをつけて、"
                                 "その中でいちばんよい場所を点数で決める"),
@@ -313,7 +624,9 @@ def build(student: bool = False):
 
         _h2(ws, "3. シートの並び", 18)
         for i, (nm, desc) in enumerate([
-            ("ステップ1_温度", "月の1日の温度は緯度でどう変わる？ どこまで信じられる？"),
+            ("ステップ1_温度", "月の1日の温度は緯度でどう変わる？ 緯度の平均を、どこまで使う？"),
+            (S1B, "緯度の帯の幅を変えて、グラフを見て、使う緯度の上限（線）を決める（判断①）"),
+            (S1C, "担当のクレーターの内部と、同じ緯度の帯の温度を比べる（判断②）"),
             ("ステップ2_海と陸", "『海』と『陸』でクレーターの数・大きさ・年代はどう違う？ 地質図と合っている？"),
             ("ステップ3_月全体", "月全体で環境を見る（日較差・地球の仰角・太陽高度）。どこも『全部で一番』にはならない"),
             ("ステップ4_地域を選ぶ", "ミッションに合う地域タイプを選び、その中でいちばんよい場所を点数で決める"),
@@ -324,7 +637,7 @@ def build(student: bool = False):
             ws.cell(row=19 + i, column=1, value=nm).font = BOLD
             ws.cell(row=19 + i, column=2, value=desc).font = BODY
         _note(ws, "参考：同じ分析を Python（pandas）で書くと？ は notebooks/course_moonbase.ipynb にあります。"
-                  "Excel でやったことと数値がそろうように作ってあります。", 27)
+                  "Excel でやったことと数値がそろうように作ってあります。", 29)
         ws.column_dimensions["A"].width = 24
         ws.column_dimensions["B"].width = 62
     _fit_notes(ws)
@@ -333,32 +646,38 @@ def build(student: bool = False):
     ws = wb.create_sheet("ステップ1_温度")
     _title(ws, "ステップ1：月の温度は1日でどれくらい変わる？")
     if student:
-        _note(ws, "月には大気がない。「1日の温度の較差（＝最高－最低）」を、緯度帯ごとに平均して比べる。"
-                  "データ『データ_温度』は3度ごとの世界地図（7200地点）。各地点に t_swing_K（1日の較差）が入っている。", 3)
+        _note(ws, "月には大気がない。「1日の温度の較差（＝最高－最低）」を、緯度の絶対値の帯ごとに平均して比べる。"
+                  "A の4つの帯は、『データ_緯度行』（月全体の0.5度のセルを、緯度の絶対値1度ごとの行にまとめた表）から求める。"
+                  "B の24時間カーブは、『データ_温度』（3度ごとの世界地図。7200地点）の1地点。", 3)
     else:
         _note(ws, "月には大気がない＝温室効果も熱の運搬もない。太陽が当たる昼と、当たらない夜の差が大きい。"
-                  "「1日の温度の較差（＝最高－最低）」を、緯度帯ごとに平均して比べる。"
-                  "データ『データ_温度』は3度ごとの世界地図（7200地点）。各地点に t_swing_K（1日の較差）が入っている。", 3)
+                  "「1日の温度の較差（＝最高－最低）」を、緯度の絶対値の帯ごとに平均して比べる。"
+                  "A の4つの帯は、『データ_緯度行』（月全体の0.5度のセル259,200個を、緯度の絶対値1度ごとの90行にまとめた表。"
+                  "旧い版は3度標本で、値が少し違った）から求める。"
+                  "B の24時間カーブ・C の着陸地点は、『データ_温度』（3度ごとの世界地図。7200地点＝0.5度のセルを3度おきにとった標本）の1地点。", 3)
 
     _h2(ws, ("A. 緯度帯ごとの1日の温度較差（黄色い緯度帯は変えずに、結果を読む）" if student
              else "A. 緯度帯ごとの1日の温度較差（黄色いセルに緯度を入れる）"), 6)
-    ws["A7"], ws["B7"], ws["C7"], ws["D7"] = "緯度の下", "緯度の上", "地点数", "1日の較差の平均 [K]"
+    ws["A7"], ws["B7"], ws["C7"], ws["D7"] = ("緯度の絶対値（下）", "緯度の絶対値（上）", "セル数（0.5度）",
+                                              "1日の較差の平均 [K]")
     for c in "ABCD":
         ws[c + "7"].font = BOLD
-    bands = [(-6, 6, "赤道"), (24, 36, "中緯度"), (54, 66, "高緯度"),
+    # 第2時（rev2）：4バンドは 0.5度の全セルを緯度の絶対値1度ごとにまとめた『データ_緯度行』から求める（北南を合わせる）
+    bands = [(0, 6, "赤道"), (24, 36, "中緯度"), (54, 66, "高緯度"),
              (78, 90, "極付近" if student else "極付近（要注意）")]
     for i, (lo, hi, label) in enumerate(bands):
         r = 8 + i
         _input(ws, f"A{r}", lo)
         _input(ws, f"B{r}", hi)
-        ws[f"C{r}"] = f'=COUNTIFS({T_LAT},">="&A{r},{T_LAT},"<="&B{r})'
-        ws[f"D{r}"] = (f'=ROUND(AVERAGEIFS({T_SWING},{T_LAT},">="&A{r},'
-                       f'{T_LAT},"<="&B{r}),0)')
+        ws[f"C{r}"] = (f'=SUMIFS({LR("C")},{LR("A")},">="&A{r},{LR("B")},"<="&B{r})')
+        ws[f"D{r}"] = (f'=ROUND(AVERAGEIFS({LR("D")},{LR("A")},">="&A{r},'
+                       f'{LR("B")},"<="&B{r}),0)')
         ws[f"D{r}"].font = BLUE
         ws[f"E{r}"] = label
         ws[f"E{r}"].font = BODY
     _note(ws, "気づき：緯度が高くなると較差は？　赤道の較差（約○○K＝約○○℃）を、"
-              "地球の砂漠の昼夜差（20〜30℃）と比べると？　極付近の値は信じてよい？（下の C も見る）", 13)
+              "地球の砂漠の昼夜差（20〜30℃）と比べると？　"
+              "帯の幅を変えたとき、グラフはどう変わる？（ステップ1b）　1行で言う", 13)
 
     _h2(ws, "B. 1地点の24時間カーブを見る（黄色いセルに地点を入れる）", 16)
     _input(ws, "B17", 0.25)
@@ -395,10 +714,11 @@ def build(student: bool = False):
     line.series[0].smooth = False
     line.series[0].graphicalProperties.line.solidFill = "1A6FB0"
     line.series[0].graphicalProperties.line.width = 22000
+    _tidy_axes(line, "0")       # 軸タイトルが目盛に重なる（Excel 実機で確認）のを直す
     # G10：以前は D16 に置いて、注意書き（A19:H19）に重なっていた。24時間の表（A21:B45）の右に移す
     ws.add_chart(line, "D21")
     _note(ws, "気づき：いちばん暑い時刻・いちばん寒い時刻はいつ？　朝と夕方でカーブの形は左右対称？　"
-              "緯度を -86.75（極付近）にすると、カーブはどうなる？　このデータはそこで信じてよい？", 47)
+              "緯度を -86.75（経度は 0.25 のまま）にして、カーブの形を見る（先生のデモ）。", 47)
 
     _h2(ws, "C. 実際に人が降りた場所の温度（『データ_着陸地点』より）", 50)
     ws["A51"], ws["B51"], ws["C51"], ws["D51"] = "着陸地点", "正午 [K]", "真夜中 [K]", "1日の差 [K]"
@@ -415,11 +735,16 @@ def build(student: bool = False):
         for c in "BCD":
             ws[f"{c}{r}"].font = BLUE
     _note(ws, "気づき：赤道の海（Apollo 11）と高緯度（Chandrayaan-3）で、1日の差はどう違う？", 56)
-    ws.column_dimensions["A"].width = 18
-    ws.column_dimensions["B"].width = 16
-    for c in "CDE":
-        ws.column_dimensions[c].width = 13
+    ws.column_dimensions["A"].width = 20
+    ws.column_dimensions["B"].width = 20
+    ws.column_dimensions["C"].width = 16
+    ws.column_dimensions["D"].width = 20
+    ws.column_dimensions["E"].width = 14
     _fit_notes(ws)
+
+    # ================= ステップ1b・1c（第2時の新シート） =================
+    build_step1b(wb, student, lr_df, LR)
+    build_step1c(wb, student, sc_df)
 
     # ================= ステップ2：海と陸 =================
     ws = wb.create_sheet("ステップ2_海と陸")
@@ -789,7 +1114,7 @@ def build(student: bool = False):
         _note(ws, "（氷採掘・南極を選んだ班向け）『データ_南極』の4つの指標を 0〜1 の点数に直して、"
                   "重みをつけて合計する（＝あなたのスコア式）。重みは黄色いセルで変える。", 3)
     _h2(ws, "A. あなたのスコア式：重み（黄色いセル。0なら「気にしない」。0〜5の整数）", 6)
-    ws["A7"], ws["B7"], ws["C7"] = "指標", "よい向き", "重み"
+    ws["A7"], ws["B7"], ws["C7"] = "指標", "どちらが良い？", "重み"
     for c in "ABC":
         ws[c + "7"].font = BOLD
     weights = [
@@ -956,8 +1281,8 @@ def build(student: bool = False):
     _fit_notes(ws)
 
     # 並び順
-    order = ["はじめに", "ステップ1_温度", "ステップ2_海と陸", S3G, S4R,
-             "ステップ4b_南極", S4B, "ステップ5_まとめ", "データ_温度", "データ_クレーター",
+    order = ["はじめに", "ステップ1_温度", S1B, S1C, "ステップ2_海と陸", S3G, S4R,
+             "ステップ4b_南極", S4B, "ステップ5_まとめ", "データ_温度", "データ_緯度行", "データ_地点比較", "データ_クレーター",
              "データ_クレーター年代", "データ_環境", "データ_地域", "データ_南極", "データ_北極",
              "データ_地質", "データ_着陸地点", "参考"]
     wb._sheets.sort(key=lambda s: order.index(s.title) if s.title in order else 99)

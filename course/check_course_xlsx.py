@@ -17,6 +17,9 @@
    C5 のプルダウンと重みの入力規則／学習者版の データ_地域 が A〜E 列だけ、など。
 3. 値の検査（--pandas / --excel）
    同じ式を pandas で再現し、Excel 実機の再計算結果と突き合わせる。
+   第2時の再設計（docs/design_dai2ji_v2.md rev2）：4バンド（295・279・234・156 K）、データ_緯度行（90行）、
+   データ_地点比較（5クレーター）、ステップ1b の線の式、ステップ1c の表・カーブを、同梱の生データ
+   （data/diviner_global.csv.gz・data/craters_subset.csv）から pandas で独立に再現して突き合わせる。
 
 終了コード: すべて合格なら 0、1つでも不合格なら 1。
 元のファイルは Excel で開かない（コピーを一時フォルダに作って開く）。
@@ -41,6 +44,7 @@ DATA = HERE / "data"
 TEACHER = HERE / "course_moonbase.xlsx"
 STUDENT = HERE / "student" / "course_moonbase_student.xlsx"
 DRIVER = HERE / "excel_driver.ps1"
+ROOT_DATA = HERE.parent / "data"          # 同梱の生データ（diviner_global.csv.gz・craters_subset.csv）
 
 # ---------------------------------------------------------------------------
 # 答え語のリスト。教員版の実物のセルから拾った「答えにあたる文・語」と、要件 §4-X-2 の語。
@@ -73,10 +77,22 @@ ANSWER_WORDS = [
     "（＝陸のほうが古い）",
 ]
 
+# 第2時の再設計（設計 §7.1）で足した語。学習者版では 0 件。教員版は、教員版に入れた語（TEACHER_NEW_PRESENT）だけ存在を確認する。
+# 「作り方」だけでは、既存の案内（「作り方は course/build_course_data.py」など）に当たるので、「データの作り方」にしてある。
+NEW_ANSWER_WORDS = [
+    "平らな地面", "斜面", "データの作り方", "本当の姿", "分かっていません", "データの限界",
+    "信頼できない", "信頼できる", "信頼しにくい", "信じにくい", "信じてよい", "岩が多い", "岩塊", "冷めにくい",
+]
+TEACHER_NEW_PRESENT = ["平らな地面", "斜面", "データの作り方"]
+ALL_ANSWER_WORDS = ANSWER_WORDS + NEW_ANSWER_WORDS
+# 新しい2つのデータ表の見出しに入れてはいけない語（判断・原因の語）
+HEADER_BAD_WORDS = ["信頼", "信じ", "判定", "外れ", "違う", "異常", "原因", "斜面", "岩", "限界", "要注意"]
+
 STUDENT_HIDDEN = ["ステップ3_月全体", "ステップ4b_南極", "ステップ5_まとめ",
                   "データ_北極", "データ_地質", "データ_クレーター年代"]
-SHEETS = ["はじめに", "ステップ1_温度", "ステップ2_海と陸", "ステップ3_月全体", "ステップ4_地域を選ぶ",
-          "ステップ4b_南極", "ステップ4b_スコア", "ステップ5_まとめ", "データ_温度", "データ_クレーター",
+S1B, S1C = "ステップ1b_帯を刻む", "ステップ1c_地点と帯"
+SHEETS = ["はじめに", "ステップ1_温度", S1B, S1C, "ステップ2_海と陸", "ステップ3_月全体", "ステップ4_地域を選ぶ",
+          "ステップ4b_南極", "ステップ4b_スコア", "ステップ5_まとめ", "データ_温度", "データ_緯度行", "データ_地点比較", "データ_クレーター",
           "データ_クレーター年代", "データ_環境", "データ_地域", "データ_南極", "データ_北極",
           "データ_地質", "データ_着陸地点", "参考"]
 YELLOW = "FFF6E9"   # 黄色い入力セルの色（アルファ部分は openpyxl 出力＝00、Excel 保存＝FF と違うので比べない）
@@ -104,7 +120,7 @@ def scan_cells(path):
                 if isinstance(c.value, str) and c.value:
                     texts.append((ws.title, c.coordinate, c.value))
     hits = {}
-    for w in ANSWER_WORDS:
+    for w in ALL_ANSWER_WORDS:
         for sh, cell, t in texts:
             if w in t:
                 hits.setdefault(w, []).append(f"{sh}!{cell}")
@@ -119,7 +135,7 @@ def scan_xml(path):
             if not n.endswith((".xml", ".rels")):
                 continue
             t = z.read(n).decode("utf-8", errors="replace")
-            for w in ANSWER_WORDS:
+            for w in ALL_ANSWER_WORDS:
                 if w in t:
                     hits.setdefault(w, []).append(n)
     return hits
@@ -127,7 +143,7 @@ def scan_xml(path):
 
 def check_answers(teacher, student):
     print("\n== 1. 答え語の検査 ==")
-    print(f"答え語リスト: {len(ANSWER_WORDS)} 語")
+    print(f"答え語リスト: {len(ANSWER_WORDS)} 語＋第2時で追加 {len(NEW_ANSWER_WORDS)} 語")
     hs, n_s = scan_cells(student)
     hx = scan_xml(student)
     record(not hs, f"学習者版：全セル（{n_s} 個の文字列セル、非表示シート含む）に答え語 0 件",
@@ -135,9 +151,19 @@ def check_answers(teacher, student):
     record(not hx, "学習者版：xlsx 内の全 XML（共有文字列・チャート・入力規則・名前・文書情報）に答え語 0 件",
            "" if not hx else "; ".join(f"「{w}」→{v[:3]}" for w, v in hx.items()))
     ht, n_t = scan_cells(teacher)
-    missing = [w for w in ANSWER_WORDS if w not in ht]
-    record(not missing, f"教員版：リストの全 {len(ANSWER_WORDS)} 語が存在（検査が空振りでない。{n_t} 個の文字列セル中）",
+    need_t = ANSWER_WORDS + TEACHER_NEW_PRESENT
+    missing = [w for w in need_t if w not in ht]
+    record(not missing, f"教員版：リストの全 {len(ANSWER_WORDS)} 語と、第2時の教員用メモの語 {len(TEACHER_NEW_PRESENT)} 語が存在（検査が空振りでない。{n_t} 個の文字列セル中）",
            "" if not missing else "教員版に無い語: " + "、".join(missing))
+    # 新しい4シートが走査対象に入っていること（文字列セルがある）。学習者版の新シートに答え語が 0 件
+    wbs = load_workbook(student, read_only=True)
+    cnt = {}
+    for nm in (S1B, S1C, "データ_緯度行", "データ_地点比較"):
+        cnt[nm] = sum(1 for row in wbs[nm].iter_rows() for c in row if isinstance(c.value, str) and c.value)
+    record(all(v > 0 for v in cnt.values()) and not any(
+        h.split("!")[0] in cnt for v in hs.values() for h in v),
+        "学習者版：新しい4シート（1b・1c・データ_緯度行・データ_地点比較）も走査対象で、答え語 0 件",
+        "文字列セル数 " + "、".join(f"{k} {v}" for k, v in cnt.items()))
     # 空振りでないことの追加確認：検査関数に教員版を食わせて検出数を出す
     print(f"       教員版での検出：{sum(len(v) for v in ht.values())} 箇所／{len(ht)} 語")
     # 非表示シートを実際に走査していること（学習者版の非表示シートの文字列数を数える）
@@ -253,17 +279,18 @@ def check_structure(teacher, student):
     wt = load_workbook(teacher)
     ws_ = load_workbook(student)
     record(wt.sheetnames == SHEETS and ws_.sheetnames == SHEETS,
-           "シート名・順序が両版で同じ（既存の18シート）")
+           "シート名・順序が両版で同じ（既存の18シート＋第2時の新しい4シート＝22シート）")
     record(all(s.sheet_state == "visible" for s in wt.worksheets), "教員版：非表示シートなし")
     hid = [s.title for s in ws_.worksheets if s.sheet_state != "visible"]
     record(sorted(hid) == sorted(STUDENT_HIDDEN), "学習者版の非表示シート", "、".join(hid))
 
     # 黄色い入力セル（要件 §3.2：位置を動かさない）
     inputs = {S4: ["C5", "C8", "C9", "C10", "C11", "C12"], S4B: ["C8", "C9", "C10", "C11"],
-              S1: ["A8", "B8", "A9", "B9", "A10", "B10", "A11", "B11", "B17", "B18"]}
+              S1: ["A8", "B8", "A9", "B9", "A10", "B10", "A11", "B11", "B17", "B18"],
+              S1B: ["B6", "B7"], S1C: ["B5"]}
     for label, wb in (("教員版", wt), ("学習者版", ws_)):
         bad = [f"{sh}!{a}" for sh, lst in inputs.items() for a in lst if fill_of(wb[sh], a) != YELLOW]
-        record(not bad, f"{label}：黄色い入力セルの位置（ステップ4 C5・C8〜C12、4b C8〜C11、ステップ1）", "、".join(bad))
+        record(not bad, f"{label}：黄色い入力セルの位置（ステップ4 C5・C8〜C12、4b C8〜C11、ステップ1、1b B6・B7、1c B5）", "、".join(bad))
     # 既定値
     t4, t4b = wt[S4], wt[S4B]
     s4, s4b = ws_[S4], ws_[S4B]
@@ -319,9 +346,9 @@ def check_structure(teacher, student):
     record(set(names) == env_regions, "データ_地域 A2:A9 の名前が データ_環境 の region 列の値と一致", f"{len(names)} 件")
     # 学習者版の「はじめに」が指導案の流れと合うこと（使うシートの記載）
     intro = " ".join(str(c.value) for row in ws_["はじめに"].iter_rows() for c in row if c.value)
-    need = ["ステップ1_温度", "ステップ2_海と陸", "ステップ4_地域を選ぶ", "ステップ4b_スコア", "上書き保存しない", "編集を有効にする"]
+    need = ["ステップ1_温度", S1B, S1C, "ステップ2_海と陸", "ステップ4_地域を選ぶ", "ステップ4b_スコア", "上書き保存しない", "編集を有効にする"]
     record(all(n in intro for n in need) and "ステップ3" not in intro and "ステップ5" not in intro,
-           "学習者版：『はじめに』は使うシート（1・2・4・4b_スコア）と操作の決まりだけを案内し、使わないシートを挙げない")
+           "学習者版：『はじめに』は使うシート（1・1b・1c・2・4・4b_スコア）と操作の決まりだけを案内し、使わないシートを挙げない")
     # 条件付き書式・チャート（Excel 保存版でも保たれていること）
     for label, wb in (("教員版", wt), ("学習者版", ws_)):
         cf4 = [str(r.sqref) for r in wb[S4].conditional_formatting]
@@ -329,10 +356,13 @@ def check_structure(teacher, student):
         record("A6" in cf4 and "A13" in cf4b, f"{label}：状態表示の条件付き書式（ステップ4 A6、4b A13）")
         record(len(wb[S1]._charts) == 1 and len(wb["ステップ4b_南極"]._charts) == 1,
                f"{label}：チャート（ステップ1・4b_南極 に各1個）")
+        record(len(wb[S1B]._charts) == 2 and len(wb[S1C]._charts) == 1,
+               f"{label}：新シートのチャート（1b に2個＝日較差・夜に最高の割合、1c に1個＝24時間カーブ）")
     record("指示されたところの黄色いセルだけ" in intro and "4つの緯度帯" in intro,
            "学習者版：『はじめに』は「指示されたところの黄色いセルだけ」「ステップ1の4つの緯度帯は変えない」と書いている")
     h = " ".join(str(c.value) for row in ws_[S1]["A6:A6"] for c in row)
     record("変えずに" in h, "学習者版：ステップ1の見出し A6 は黄色い緯度帯を変えない案内（教員版は従来どおり）")
+    check_structure_dai2ji(wt, ws_)
     # 文書情報に個人名がない
     with zipfile.ZipFile(student) as z:
         core = z.read("docProps/core.xml").decode("utf-8")
@@ -340,6 +370,70 @@ def check_structure(teacher, student):
         core_t = z.read("docProps/core.xml").decode("utf-8")
     ok_meta = all("lastModifiedBy" not in x and not re.search(r"<dc:creator>[^<]+</dc:creator>", x) for x in (core, core_t))
     record(ok_meta, "両版：文書情報に最終更新者・作成者がない（空）")
+
+
+
+def check_structure_dai2ji(wt, ws_):
+    """第2時の再設計（設計 §7.1）：新シート・黄色セル・入力規則・式・旧Bの残存・データ表の見出し"""
+    for label, wb in (("教員版", wt), ("学習者版", ws_)):
+        b = wb[S1B]
+        dvs = b.data_validations.dataValidation
+        lst = [d for d in dvs if d.type == "list" and "B6" in str(d.sqref) and d.formula1 == '"30,5,1"']
+        whole = [d for d in dvs if d.type == "whole" and "B7" in str(d.sqref) and d.formula1 == "50" and d.formula2 == "90"]
+        record(len(lst) == 1 and len(whole) == 1,
+               f"{label}：1b の入力規則（B6＝帯の幅 30・5・1 の一覧、B7＝線 50〜90 の整数）")
+        c = wb[S1C]
+        dvc = [d for d in c.data_validations.dataValidation if d.type == "list" and "B5" in str(d.sqref) and d.formula1 == "SiteNames"]
+        ref = wb.defined_names.get("SiteNames")
+        record(len(dvc) == 1 and ref is not None and ref.attr_text == "データ_地点比較!$A$2:$A$6",
+               f"{label}：1c の B5 のプルダウン（名前 SiteNames＝データ_地点比較!A2:A6、5択）")
+        # グラフの位置：「夜に最高の割合」（縦軸 0〜8）を最初の画面（G5）に、日較差（縦軸 0〜300）を下（G15）に置く
+        pos = {}
+        for ch in b._charts:
+            top = ch.anchor._from
+            pos[ch.y_axis.scaling.max] = (top.col, top.row)       # 0 始まり：G=6、5行目=4
+        record(pos.get(8) == (6, 4) and pos.get(300) == (6, 14),
+               f"{label}：1b のグラフの位置（夜に最高の割合＝G5、日較差＝G15。B6・B7 を変えながら割合のグラフが最初の画面に見える）", str(pos))
+        n8 = str(b["A8"].value or "")
+        record("B9" in n8 and "1°ごと" in n8 and "30" in n8 and "幅を 1" in n8 and b["A8"].coordinate in b.merged_cells,
+               f"{label}：1b A8 の注（B9 は1°ごとの行の値。幅30では平均で小さく見え、幅1ではB9と同じ値）に、判断・原因の語がない", n8)
+        c3 = str(c["A3"].value or "")
+        record("四角" in c3 and "半径の半分の長さ＋0.25度" in c3 and "半径の半分以内" not in c3,
+               f"{label}：1c A3 の「内部」の説明が実装（四角＋0.25度）と一致（円の記述が残っていない）", c3)
+        f9, f10 = str(b["B9"].value), str(b["B10"].value)
+        record("SUMPRODUCT(MAX(" in f9 and "データ_緯度行!$B$2:$B$91<=$B$7" in f9 and "SIN(RADIANS($B$7))" in f10
+               and "MAXIFS" not in f9 and "MINIFS" not in f9,
+               f"{label}：1b の式（B9＝SUMPRODUCT(MAX(…))、B10＝(1−SIN(RADIANS(線)))×100。MINIFS・MAXIFS は使わない）")
+        record(b["B6"].value == 30 and b["B7"].value == 90 and
+               str(b["B15"].value).startswith("=AVERAGEIFS(データ_緯度行!$D$2:$D$91") and
+               b.max_row >= 104,
+               f"{label}：1b の既定値（幅30・線90）と、90行の表（A15:E104）の式")
+        record(any("B15" in str(r.sqref) or "A15" in str(r.sqref) for r in b.conditional_formatting) and
+               any("A11" in str(r.sqref) for r in b.conditional_formatting) and
+               any("A6" in str(r.sqref) for r in c.conditional_formatting),
+               f"{label}：1b の線の外側（灰色）と状態表示（1b A11・1c A6）の条件付き書式")
+        d1 = wb[S1]["D8"].value
+        record(all(str(wb[S1][f"D{r}"].value).startswith("=ROUND(AVERAGEIFS(データ_緯度行!$D$2:$D$91") for r in range(8, 12))
+               and [(wb[S1][f"A{r}"].value, wb[S1][f"B{r}"].value) for r in range(8, 12)] == [(0, 6), (24, 36), (54, 66), (78, 90)],
+               f"{label}：ステップ1 A8:D11 は データ_緯度行 から求める（緯度の絶対値 0〜6・24〜36・54〜66・78〜90）")
+        s1 = wb[S1]
+        record(s1["B17"].value == 0.25 and s1["B18"].value == 0.25 and str(s1["B22"].value).startswith("=SUMIFS(データ_温度")
+               and len(s1._charts) == 1 and s1["A52"].value == "Apollo 11",
+               f"{label}：旧B（B17:B18・24時間カーブ B22:B45・チャート）と旧C（着陸地点）は残っている")
+        txt1 = " ".join(str(x.value) for row in s1.iter_rows() for x in row if x.value)
+        record("信じてよい" not in txt1 and "極付近の値は信じ" not in txt1 and "先生のデモ" in txt1 and "帯の幅を変えたとき" in txt1,
+               f"{label}：ステップ1 の A13・A47 から「信じてよい？」を除き、「ステップ1b」「先生のデモ」の案内にした")
+        # 学習者版・教員版の新シートの黄色セルの既定値
+    record(ws_[S1C]["B5"].value in (None, "") and wt[S1C]["B5"].value == "コペルニクス",
+           "1c の B5：学習者版は空欄（担当を選ぶ）、教員版は教員の例＝コペルニクス")
+    # 新しい2つのデータ表の見出し・中身
+    for label, wb in (("教員版", wt), ("学習者版", ws_)):
+        h1 = [str(wb["データ_緯度行"].cell(row=1, column=c).value) for c in range(1, 6)]
+        h2 = [str(wb["データ_地点比較"].cell(row=1, column=c).value) for c in range(1, wb["データ_地点比較"].max_column + 1)]
+        bad = [w for w in HEADER_BAD_WORDS if any(w in h for h in h1 + h2)]
+        record(not bad and "21〜3時" in h1[4] and len(h2) == 58 and wb["データ_緯度行"].max_row == 91 and wb["データ_地点比較"].max_row == 6,
+               f"{label}：データ_緯度行（90行×5列・見出しに窓 21〜3時）・データ_地点比較（5行×58列）の見出しに判断・原因の語がない",
+               "" if not bad else f"見出しの語 {bad}")
 
 
 # ---------------------------------------------------------------------------
@@ -365,17 +459,46 @@ class Expect:
         self.ps = pd.read_csv(DATA / "polar_south_sites.csv")
         self.ps["row"] = np.arange(2, len(self.ps) + 2)
         self.temp = pd.read_csv(DATA / "temp_grid.csv")
+        self.lr = pd.read_csv(DATA / "temp_lat_rows.csv")          # データ_緯度行 の中身（build_course_data.py の出力）
+        self.sc = pd.read_csv(DATA / "site_compare.csv")           # データ_地点比較 の中身
         self.cr = pd.read_csv(DATA / "craters_labeled.csv")
         self.ref = pd.read_csv(DATA / "reference.csv")
         self.regions = list(pd.read_csv(DATA / "candidate_regions.csv")["name"])
 
     # --- ステップ1・2 ---
+    BANDS = [(0, 6), (24, 36), (54, 66), (78, 90)]
+
+    def bands_raw(self):
+        """4バンドの日較差の平均（未丸め）。temp_lat_rows.csv の行（lat_lo>=下 かつ lat_hi<=上）の swing_K の平均"""
+        return [float(self.lr.loc[(self.lr["lat_lo"] >= lo) & (self.lr["lat_hi"] <= hi), "swing_K"].mean())
+                for lo, hi in self.BANDS]
+
     def bands(self):
+        return [int(round(x)) for x in self.bands_raw()]
+
+    def line_expect(self, line):
+        """ステップ1b の B9・B10 の期待値：線の内側（行の上端が線以下）の割合の最大 [%]、使えなくなる月の面積 [%]"""
+        mx = float(self.lr.loc[self.lr["lat_hi"] <= line, "night_peak_pct"].max())
+        return round(mx, 1), round(float((1 - np.sin(np.radians(line))) * 100), 1)
+
+    def band_rows(self, width):
+        """ステップ1b の表（90行）の期待値：各行が入る帯（幅 width）の平均。(日較差, 夜に最高の割合)"""
         out = []
-        for lo, hi in [(-6, 6), (24, 36), (54, 66), (78, 90)]:
-            m = (self.temp["lat"] >= lo) & (self.temp["lat"] <= hi)
-            out.append(int(round(self.temp.loc[m, "t_swing_K"].mean())))
+        for lo in self.lr["lat_lo"]:
+            b_lo = (lo // width) * width
+            m = (self.lr["lat_lo"] >= b_lo) & (self.lr["lat_hi"] <= b_lo + width)
+            out.append((float(self.lr.loc[m, "swing_K"].mean()), float(self.lr.loc[m, "night_peak_pct"].mean())))
         return out
+
+    _raw = None
+
+    @classmethod
+    def raw(cls):
+        """同梱の生データ（0.5°格子）。csv の再現用（表計算の入力とは独立に pandas で作り直す）"""
+        if cls._raw is None:
+            d = pd.read_csv(ROOT_DATA / "diviner_global.csv.gz")
+            cls._raw = d
+        return cls._raw
 
     def density(self):
         ns = int((self.cr["区分"] == "海").sum())
@@ -466,10 +589,122 @@ def range_text4b(ex, rows):
             f"永久影まで {fmt1(c.min())} 〜 {fmt1(c.max())} km")
 
 
+
+# 設計 §2.3 の5クレーター（夜の最低温度 [K]：内部、帯の平均、帯の9割の下端・上端、内部のセル数）。表示は小数1桁
+SITE_EXPECT = {
+    "ティコ": (114.2, 89.4, 87.2, 91.7, 15),
+    "コペルニクス": (103.4, 95.4, 94.0, 97.3, 16),
+    "ラングレヌス": (98.5, 95.1, 93.4, 97.1, 30),
+    "プトレマイオス": (94.8, 95.2, 93.4, 97.3, 42),
+    "アルフォンスス": (94.3, 94.7, 93.0, 96.5, 25),
+}
+# 設計 §2.1：緯度の絶対値の行ごとの「最高が21〜3時に来る割合」[%]（小数1桁）
+ROW_EXPECT = {84: 0.0, 85: 1.0, 86: 6.8, 87: 4.2, 88: 3.7, 89: 1.5}
+SITE_IDS = {"コペルニクス": "04-1-000623", "ティコ": "05-1-000975", "ラングレヌス": "07-1-000317",
+            "プトレマイオス": "05-1-000082", "アルフォンスス": "05-1-000176"}
+
+
+def site_from_raw(cid):
+    """付録B の骨子で、生データから内部・帯を作り直す（build_course_data.py とは別に書いた再現）"""
+    d = Expect.raw()
+    LTc = [f"t_lt{h:02d}" for h in range(24)]
+    cs = pd.read_csv(ROOT_DATA / "craters_subset.csv").set_index("crater_id")
+    lat, lon, D = (float(cs.loc[cid, c]) for c in ("lat", "lon", "diam_km"))
+    R = 1737.4
+    dl = np.degrees(D / 2 * 0.5 / R)
+    dlo = dl / np.cos(np.radians(lat))
+    inner = (abs(d.lat - lat) <= dl + 0.25) & (abs(d.lon - lon) <= dlo + 0.25)
+    dl2 = np.degrees(D / R) / np.cos(np.radians(lat))
+    band = (abs(d.lat - lat) <= 1.5) & (abs(d.lon - lon) > dl2)
+    A = d[LTc].values
+    tmin = A.min(axis=1)
+    return dict(n_inner=int(inner.sum()), n_band=int(band.sum()),
+                inner_curve=A[inner.values].mean(axis=0), band_curve=A[band.values].mean(axis=0),
+                inner_tmin=tmin[inner.values].mean(), band_tmin=tmin[band.values].mean(),
+                p5=np.percentile(tmin[band.values], 5), p95=np.percentile(tmin[band.values], 95))
+
+
+def check_dai2ji_pandas(ex):
+    print("   [第2時の再設計：データ_緯度行・データ_地点比較・4バンド・線の式（生データから pandas で再現）]")
+    d = Expect.raw()
+    LTc = [f"t_lt{h:02d}" for h in range(24)]
+    A = d[LTc].values
+    swing = A.max(axis=1) - A.min(axis=1)
+    pk = A.argmax(axis=1)
+    night = ((pk >= 21) | (pk <= 3)).astype(float) * 100          # 窓＝現地時間 21〜3時
+    lo = np.floor(d["lat"].abs().values).astype(int)
+    g = pd.DataFrame({"lo": lo, "sw": swing, "nt": night}).groupby("lo").agg(n=("sw", "size"), sw=("sw", "mean"), nt=("nt", "mean"))
+    lr = ex.lr.set_index("lat_lo")
+    record(len(lr) == 90 and (lr["n_cells"] == 2880).all() and (g["n"] == 2880).all(),
+           "データ_緯度行：90行、各行 2,880 セル（0.5°格子 259,200 セルを北南合わせて分ける）")
+    e1 = np.abs(lr["swing_K"].values - g["sw"].values).max()
+    e2 = np.abs(lr["night_peak_pct"].values - g["nt"].values).max()
+    record(e1 < 6e-4 and e2 < 6e-4,
+           "データ_緯度行：swing_K・night_peak_pct が、生データからの再計算と一致（差 0.0006 未満。保存は小数3桁）",
+           f"最大差 {e1:.5f} / {e2:.5f}")
+    rows = {k: round(float(lr.loc[k, "night_peak_pct"]), 1) for k in ROW_EXPECT}
+    record(rows == ROW_EXPECT and (lr.loc[:84, "night_peak_pct"] == 0).all(),
+           f"night_peak_pct（21〜3時）の設計 §2.1 の行：{rows}。0〜84°の行はすべて 0.0")
+    band5 = float(lr.loc[85:89, "night_peak_pct"].mean())
+    mx = {w: round(max(v[1] for v in ex.band_rows(w)), 1) for w in (30, 5, 1)}
+    record(abs(band5 - 3.4) < 0.05 and mx == {30: 0.6, 5: 3.4, 1: 6.8},
+           f"帯の幅を変えたときの最大：30°幅 {mx[30]}％・5°幅 {mx[5]}％・1°幅 {mx[1]}％（設計 0.6・3.4・6.8）、85〜90°帯 {band5:.2f}％")
+    raw4 = ex.bands_raw()
+    record(all(abs(a - b) < 1e-3 for a, b in zip(raw4, (294.508, 279.044, 233.94, 155.572))),
+           f"4バンド（未丸め）{[round(x, 3) for x in raw4]}（設計 294.508・279.044・233.94・155.572）")
+    direct = [float(np.mean([g.loc[k, "sw"] for k in range(lo_, hi_)])) for lo_, hi_ in ex.BANDS]
+    record(all(abs(a - b) < 1e-3 for a, b in zip(direct, raw4)), "4バンドは、生データのセルから直接（行の等重み平均）求めた値とも一致")
+    tcols = [f"t_lt{h:02d}" for h in range(24)]
+    t0 = ex.temp[tcols].iloc[0]
+    record(abs(float(ex.temp["t_swing_K"].iloc[0]) - float(t0.max() - t0.min())) < 0.11,
+           "日較差の定義は教材の t_swing_K（temp_grid.csv）と同じ＝1日の最高−最低")
+    # 線の式：(線, 内側の最大, 使えなくなる面積)。設計 §7.1 は「線85で 1.0／0.4」だが、式（行の上端<=線）では
+    # 線85の内側に 85〜86° の行は入らず 0.0（1.0 になるのは線86）
+    exp = {50: (0.0, 23.4), 70: (0.0, 6.0), 80: (0.0, 1.5), 85: (0.0, 0.4), 86: (1.0, 0.2), 87: (6.8, 0.1), 88: (6.8, 0.1), 90: (6.8, 0.0)}
+    got = {k: ex.line_expect(k) for k in exp}
+    record(got == exp, f"ステップ1b の線の式（pandas）：{got}")
+    w = np.cos(np.radians(d["lat"].values))
+    area = {k: round(float(w[np.abs(d['lat'].values) > k].sum() / w.sum() * 100), 2) for k in (70, 85)}
+    record(abs(area[70] - 6.0) < 0.05 and abs(area[85] - 0.38) < 0.01,
+           f"使えなくなる月の面積＝(1−sin(線))×100 は、0.5°セルの余弦重みの和でも一致：線70° {area[70]}％、線85° {area[85]}％")
+    # 地点比較
+    sc = ex.sc.set_index("site_name")
+    bad = []
+    for nm, cid in SITE_IDS.items():
+        r = site_from_raw(cid)
+        x = sc.loc[nm]
+        ok = (r["n_inner"] == x["n_inner"] and r["n_band"] == x["n_band"]
+              and abs(r["inner_tmin"] - x["inner_tmin"]) < 0.006 and abs(r["band_tmin"] - x["band_tmin"]) < 0.006
+              and abs(r["p5"] - x["band_tmin_p5"]) < 0.006 and abs(r["p95"] - x["band_tmin_p95"]) < 0.006
+              and np.abs(r["inner_curve"] - x[[f"inner_t_lt{h:02d}" for h in range(24)]].values.astype(float)).max() < 0.006
+              and np.abs(r["band_curve"] - x[[f"band_t_lt{h:02d}" for h in range(24)]].values.astype(float)).max() < 0.006)
+        if not ok:
+            bad.append(nm)
+    record(not bad and len(sc) == 5 and sc.shape[1] == 57,
+           "データ_地点比較：5クレーターの内部・帯・カーブ・最低温度が生データからの再計算と一致（地点名＋57列＝58列）",
+           "" if not bad else f"不一致 {bad}")
+    bad = []
+    for nm, (i, b, p5, p95, n) in SITE_EXPECT.items():
+        x = sc.loc[nm]
+        if not (round(x["inner_tmin"], 1) == i and round(x["band_tmin"], 1) == b and round(x["band_tmin_p5"], 1) == p5
+                and round(x["band_tmin_p95"], 1) == p95 and int(x["n_inner"]) == n):
+            bad.append((nm, round(x["inner_tmin"], 1), round(x["band_tmin"], 1), x["band_tmin_p5"], x["band_tmin_p95"], int(x["n_inner"])))
+    record(not bad, "5クレーターの夜の最低温度が設計 §2.3 と一致（内部・帯の平均・帯の9割の下端上端・内部のセル数）", "" if not bad else str(bad))
+    diffs = {nm: float(sc.loc[nm, "inner_tmin"] - sc.loc[nm, "band_tmin"]) for nm in SITE_EXPECT}
+    record(round(diffs["ティコ"]) == 25 and round(diffs["コペルニクス"]) == 8 and round(diffs["ラングレヌス"], 1) == 3.4
+           and round(diffs["プトレマイオス"], 1) == -0.3 and round(diffs["アルフォンスス"], 1) == -0.3,
+           "内部−帯の平均：" + "、".join(f"{k}{v:+.1f}" for k, v in diffs.items()) + "（設計：＋25・＋8・＋3.4・−0.3・−0.3 K）")
+    out = {nm: bool(sc.loc[nm, "inner_tmin"] > sc.loc[nm, "band_tmin_p95"] or sc.loc[nm, "inner_tmin"] < sc.loc[nm, "band_tmin_p5"])
+           for nm in SITE_EXPECT}
+    record([out[k] for k in SITE_EXPECT] == [True, True, True, False, False],
+           f"（教員用の確認）内部が帯の9割の範囲の外：{out}（ティコ・コペルニクス・ラングレヌス＝外、プトレマイオス・アルフォンスス＝内）")
+
+
 def check_pandas(ex):
     print("\n== 3a. pandas による式の再現 ==")
     b = ex.bands()
-    record(b == [295, 280, 236, 161], f"ステップ1の4バンドの日較差の平均 {b}（期待 295・280・236・161 K）")
+    record(b == [295, 279, 234, 156], f"ステップ1の4バンドの日較差の平均 {b}（期待 295・279・234・156 K。データ_緯度行 の行から）")
+    check_dai2ji_pandas(ex)
     ns, nl, ds, dl, r1, r = ex.density()
     record((ns, nl) == (2232, 34145) and abs(r - 3.52) < 0.005,
            f"ステップ2：クレーター数 海{ns}・陸{nl}、密度 海{ds}・陸{dl}、倍率 {r:.3f}（表示は小数1桁で {r1}）")
@@ -580,6 +815,112 @@ def top_from(grid):
     return [(num(r[0]), num(r[1])) for r in grid if num(r[0]) is not None]
 
 
+
+SITES = ["コペルニクス", "ティコ", "ラングレヌス", "プトレマイオス", "アルフォンスス"]
+LINES_CHECK = (50, 70, 80, 85, 86, 87, 88, 90)
+
+
+def _f(x):
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return None
+
+
+def check_excel_dai2ji(ex, out, label, student, lines):
+    """第2時の再設計：Excel 実機の再計算結果を pandas の再現と突き合わせる"""
+    # 4バンド・旧B
+    bands = [int(r[3]) for r in out["bands_after"]]
+    record(bands == [295, 279, 234, 156], f"{label}：ステップ1 A8:D11（Excel）の4バンド {bands}")
+    cnt = [int(r[2]) for r in out["bands_after"]]
+    exp_cnt = [int(ex.lr.loc[(ex.lr["lat_lo"] >= lo) & (ex.lr["lat_hi"] <= hi), "n_cells"].sum()) for lo, hi in ex.BANDS]
+    record(cnt == exp_cnt, f"{label}：ステップ1 C8:C11（セル数 0.5°）{cnt}")
+    pol = [r[0] for r in out["old_b_polar"]]
+    eq = [r[0] for r in out["old_b_eq"]]
+    record(abs(pol[0] - 49.6) < 0.06 and abs(pol[1] - 174.4) < 0.06 and abs(pol[2] - 170.5) < 0.06 and abs(max(eq) - 394.0) < 6 and abs(min(eq) - 96.2) < 0.06,
+           f"{label}：旧デモ（B17・B18＝-86.75・0.25）の24時間カーブは 0時{pol[0]}・1時{pol[1]}・2時{pol[2]} K（設計：49.6・174.4・170.5）、赤道 0.25・0.25 は最高{max(eq)}・最低{min(eq)} K（設計 約394・96.2）")
+    # 入力規則（Excel 実機）
+    d6, d7, d5 = out["dv_b6"], out["dv_b7"], out["dv_site"]
+    record(d6.get("type") == 3 and "30,5,1" in str(d6.get("formula1")) and d6.get("in_cell_dropdown") is True and d6.get("alert_style") == 1
+           and d7.get("type") == 1 and d7.get("formula1") == "50" and d7.get("formula2") == "90" and d7.get("operator") == 1
+           and d5.get("type") == 3 and d5.get("formula1") == "=SiteNames" and d5.get("in_cell_dropdown") is True and d5.get("alert_style") == 1,
+           f"{label}：入力規則（Excel）：1b B6＝一覧 {d6.get('formula1')}、B7＝整数 {d7.get('formula1')}〜{d7.get('formula2')}、1c B5＝一覧 {d5.get('formula1')}（いずれも停止メッセージ）")
+    okv6 = [out[f"v6_ok{n}"] for n in (30, 5, 1)]
+    ngv6 = [out[f"v6_ng{n}"] for n in (10, 0, "abc")]
+    record(all(v is True for v in okv6) and all(v is False for v in ngv6),
+           f"{label}：1b B6（帯の幅）の入力規則：30・5・1 は受理、10・0・abc は拒否")
+    okv7 = [out[f"v7_ok{n}"] for n in (50, 90, 85)]
+    ngv7 = [out[f"v7_ng{n}"] for n in (49, 91, "85.5", "x")]
+    record(all(v is True for v in okv7) and all(v is False for v in ngv7),
+           f"{label}：1b B7（線）の入力規則：50・90・85 は受理、49・91・85.5・x は拒否")
+    record(all(out[f"v5_ok{i}"] is True for i in range(5)) and out["v5_ng"] is False and out["v5_ng2"] is False,
+           f"{label}：1c B5（クレーター）の入力規則：5 つの名前は受理、「でたらめ」「コペ」（名前の一部）は拒否")
+    # 1b：幅ごとの表（90行）と、線の式
+    for wd in (30, 5, 1):
+        tbl = out[f"b1_tbl_{wd}"]
+        exp = ex.band_rows(wd)
+        got = [(_f(r[1]), _f(r[2])) for r in tbl]
+        ok = (len(got) == 90 and all(g[0] is not None and abs(g[0] - e[0]) < 1e-6 and abs(g[1] - e[1]) < 1e-6 for g, e in zip(got, exp))
+              and [int(r[0]) for r in tbl] == list(range(90)))
+        record(ok, f"{label}：1b の表（90行）が、帯の幅 {wd}° の pandas の再現と一致（日較差・最高が21〜3時に来る割合）",
+               f"最大の割合 {max(g[1] for g in got):.2f}％")
+        res = [r[0] for r in out[f"b1_res_{wd}"]]
+        st = out[f"b1_st_{wd}"][0][0]
+        record(res[0] == 6.8 and res[1] == 0.0 and st.startswith("OK"),
+               f"{label}：幅{wd}・線90 の B9・B10＝{res}、状態表示「{st}」")
+    bad = []
+    for ln in lines:
+        r = [x[0] for x in out[f"b1_line_{ln}"]]
+        e = ex.line_expect(ln)
+        if not (abs(r[0] - e[0]) < 1e-9 and abs(r[1] - e[1]) < 1e-9):
+            bad.append((ln, r, e))
+    record(not bad, f"{label}：1b の B9・B10（線 {list(lines)}）が pandas の再現と一致（線70＝0.0／6.0、線85＝0.0／0.4、線86＝1.0／0.2、線87＝6.8／0.1）",
+           "" if not bad else str(bad))
+    b9 = out["b1_bad7_res"]
+    record(all(x[0] == "" for x in b9) and out["b1_bad7_st"][0][0].startswith("【注意】線は 50〜90 の整数"),
+           f"{label}：1b 線が範囲外（貼り付けで 95）→ B9・B10 は空白、「{out['b1_bad7_st'][0][0]}」")
+    record(out["b1_bad6_st"][0][0].startswith("【注意】帯の幅は 30・5・1"),
+           f"{label}：1b 帯の幅が範囲外（貼り付けで 10）→「{out['b1_bad6_st'][0][0]}」")
+    # 1c：5クレーター
+    sc = ex.sc.set_index("site_name")
+    bad, bad_c = [], []
+    for i, nm in enumerate(SITES):
+        row = [_f(x) for x in out[f"c1_row_{i}"][0]]
+        x = sc.loc[nm]
+        exp = [round(x["inner_tmin"], 1), round(x["band_tmin"], 1), round(x["band_tmin_p5"], 1), round(x["band_tmin_p95"], 1)]
+        if row != exp:
+            bad.append((nm, row, exp))
+        curve = [(_f(a[0]), _f(a[1])) for a in out[f"c1_curve_{i}"]]
+        ei = [float(x[f"inner_t_lt{h:02d}"]) for h in range(24)]
+        eb = [float(x[f"band_t_lt{h:02d}"]) for h in range(24)]
+        if not all(abs(c[0] - a) < 1e-6 and abs(c[1] - b) < 1e-6 for c, a, b in zip(curve, ei, eb)):
+            bad_c.append(nm)
+        st = out[f"c1_st_{i}"][0][0]
+        if not st.startswith(f"OK　{nm}：内部 {int(x['n_inner'])} セル、帯 {int(x['n_band'])} セル"):
+            bad.append((nm, st))
+    record(not bad, f"{label}：1c の夜の最低温度の1行（内部・帯の平均・帯の9割の下端上端）と状態表示が、5クレーターとも pandas の再現と一致", "" if not bad else str(bad))
+    record(not bad_c, f"{label}：1c の24時間カーブ（B15:C38）が、5クレーターとも データ_地点比較 と一致", "" if not bad_c else str(bad_c))
+    record(out["c1_blank_st"][0][0].startswith("担当のクレーターを選んでください") and all(x == "" for x in out["c1_blank_row"][0])
+           and out["c1_bad_st"][0][0].startswith("【注意】B5 の名前が") and all(x == "" for x in out["c1_bad_row"][0]),
+           f"{label}：1c B5 が空欄 →「{out['c1_blank_st'][0][0]}」、不一致 →「{out['c1_bad_st'][0][0]}」（表は空白）")
+    # チャート（Excel が描く）
+    sheets = {n: c for n, v, c in out["info"]["sheets"]}
+    record(sheets.get(S1) == 1 and sheets.get(S1B) == 2 and sheets.get(S1C) == 1,
+           f"{label}：Excel のチャート数：ステップ1＝{sheets.get(S1)}（旧B のまま）、1b＝{sheets.get(S1B)}、1c＝{sheets.get(S1C)}")
+    c1b, c1c = out["chart_1b"], out["chart_1c"]
+    ax1 = [c[5] for c in c1b] if c1b and len(c1b[0]) > 5 else []
+    ok1b = (len(c1b) == 2 and len(ax1) == 2 and ax1[0].get("y_min") == 0 and ax1[0].get("y_max") == 300 and ax1[1].get("y_max") == 8
+            and c1b[1][1] == "$G$5" and c1b[0][1] == "$G$15"
+            and all(a.get("x_label_spacing") == 10 and a.get("legend") is False for a in ax1)
+            and all(len(c[4]) == 1 for c in c1b))
+    ax2 = c1c[0][5] if c1c and len(c1c[0]) > 5 else {}
+    ok1c = len(c1c) == 1 and len(c1c[0][4]) == 2 and ax2.get("legend") is True
+    record(ok1b and ok1c,
+           f"{label}：チャートの軸・系列（Excel）1b＝縦軸 {ax1[0].get('y_min') if ax1 else '?'}〜{ax1[0].get('y_max') if ax1 else '?'} と 0〜{ax1[1].get('y_max') if ax1 else '?'}（固定）・横軸の目盛 10 ごと、1c＝2系列・凡例あり",
+           f"1b {c1b[0][1] if c1b else ''}・{c1b[1][1] if len(c1b) > 1 else ''}、1c {c1c[0][1] if c1c else ''}")
+    record((out.get("png_1b") == 2 and out.get("png_1c") == 1) and not out.get("errors"),
+           f"{label}：Excel が描いたチャートを PNG に書き出せた（1b 2個・1c 1個。目視確認用）")
+
 def check_excel(ex, path, label, workdir, student):
     print(f"\n== 3b. Excel 実機（{label}） ==")
     steps = [{"op": "info", "key": "info"}, {"op": "calc", "key": "first"}]
@@ -656,6 +997,74 @@ def check_excel(ex, path, label, workdir, student):
     steps.append({"op": "chart", "sheet": S1, "key": "chart1"})
     steps.append({"op": "chart", "sheet": "ステップ4b_南極", "key": "chart2"})
 
+    # ---- 第2時の再設計：ステップ1（旧B）・1b・1c ----
+    g(S1, "A8:D11", "bands_after")
+    steps.append({"op": "set", "sheet": S1, "addr": "B17", "value": -86.75})
+    steps.append({"op": "set", "sheet": S1, "addr": "B18", "value": 0.25})
+    steps.append({"op": "calc", "key": "old_demo"})
+    g(S1, "B22:B45", "old_b_polar")
+    steps.append({"op": "set", "sheet": S1, "addr": "B17", "value": 0.25})
+    steps.append({"op": "calc", "key": "old_demo2"})
+    g(S1, "B22:B45", "old_b_eq")
+    steps.append({"op": "dv", "sheet": S1B, "addr": "B6", "key": "dv_b6"})
+    steps.append({"op": "dv", "sheet": S1B, "addr": "B7", "key": "dv_b7"})
+    steps.append({"op": "dv", "sheet": S1C, "addr": "B5", "key": "dv_site"})
+    for k, v in (("ok30", 30), ("ok5", 5), ("ok1", 1), ("ng10", 10), ("ng0", 0), ("ngabc", "abc")):
+        steps.append({"op": "testvalid", "sheet": S1B, "addr": "B6", "value": v, "key": "v6_" + k})
+    for k, v in (("ok50", 50), ("ok90", 90), ("ok85", 85), ("ng49", 49), ("ng91", 91), ("ng85.5", 85.5), ("ngx", "x")):
+        steps.append({"op": "testvalid", "sheet": S1B, "addr": "B7", "value": v, "key": "v7_" + k})
+    for i, nm in enumerate(SITES):
+        steps.append({"op": "testvalid", "sheet": S1C, "addr": "B5", "value": nm, "key": f"v5_ok{i}"})
+    steps.append({"op": "testvalid", "sheet": S1C, "addr": "B5", "value": "でたらめ", "key": "v5_ng"})
+    steps.append({"op": "testvalid", "sheet": S1C, "addr": "B5", "value": "コペ", "key": "v5_ng2"})
+    # 1b：幅 30・5・1 の表（90行）。線は 90（全部内側）
+    for wd in (30, 5, 1):
+        steps.append({"op": "set", "sheet": S1B, "addr": "B6", "value": wd})
+        steps.append({"op": "set", "sheet": S1B, "addr": "B7", "value": 90})
+        steps.append({"op": "calc", "key": f"b1_{wd}"})
+        g(S1B, "A15:E104", f"b1_tbl_{wd}")
+        g(S1B, "B9:B10", f"b1_res_{wd}")
+        g(S1B, "A11", f"b1_st_{wd}", True)
+    LINES = (50, 70, 80, 85, 86, 87, 88, 90)
+    for ln in LINES:
+        steps.append({"op": "set", "sheet": S1B, "addr": "B7", "value": ln})
+        steps.append({"op": "calc", "key": f"b1_line{ln}"})
+        g(S1B, "B9:B10", f"b1_line_{ln}")
+        g(S1B, "A11", f"b1_linest_{ln}", True)
+    steps.append({"op": "set", "sheet": S1B, "addr": "B7", "value": 95})       # 貼り付けなどで範囲外が入った場合
+    steps.append({"op": "calc", "key": "b1_bad7"})
+    g(S1B, "B9:B10", "b1_bad7_res", True)
+    g(S1B, "A11", "b1_bad7_st", True)
+    steps.append({"op": "set", "sheet": S1B, "addr": "B7", "value": 85})
+    steps.append({"op": "set", "sheet": S1B, "addr": "B6", "value": 10})
+    steps.append({"op": "calc", "key": "b1_bad6"})
+    g(S1B, "A11", "b1_bad6_st", True)
+    # 1c：5クレーター＋空欄＋でたらめ
+    for i, nm in enumerate(SITES):
+        steps.append({"op": "set", "sheet": S1C, "addr": "B5", "value": nm})
+        steps.append({"op": "calc", "key": f"c1_{i}"})
+        g(S1C, "B10:E10", f"c1_row_{i}")
+        g(S1C, "B15:C38", f"c1_curve_{i}")
+        g(S1C, "A6", f"c1_st_{i}", True)
+    for key, val in (("blank", None), ("bad", "でたらめ")):
+        steps.append({"op": "set", "sheet": S1C, "addr": "B5", "value": val})
+        steps.append({"op": "calc", "key": "c1_" + key})
+        g(S1C, "A6", f"c1_{key}_st", True)
+        g(S1C, "B10:E10", f"c1_{key}_row", True)
+        g(S1C, "B15:C16", f"c1_{key}_curve", True)
+    # 見た目の確認用：状態を決めてから、チャートを PNG、シートを PDF に出す（検証用コピー。原本は保存しない）
+    steps.append({"op": "set", "sheet": S1B, "addr": "B6", "value": 1})
+    steps.append({"op": "set", "sheet": S1B, "addr": "B7", "value": 85})
+    steps.append({"op": "set", "sheet": S1C, "addr": "B5", "value": "ラングレヌス"})
+    steps.append({"op": "calc", "key": "final"})
+    steps.append({"op": "chart", "sheet": S1B, "key": "chart_1b"})
+    steps.append({"op": "chart", "sheet": S1C, "key": "chart_1c"})
+    steps.append({"op": "exportchart", "sheet": S1B, "path": os.path.join(workdir, "chart_1b"), "key": "png_1b"})
+    steps.append({"op": "exportchart", "sheet": S1C, "path": os.path.join(workdir, "chart_1c"), "key": "png_1c"})
+    steps.append({"op": "exportpdf", "sheet": S1B, "path": os.path.join(workdir, "sheet_1b.pdf"), "area": "A1:R40", "landscape": True, "fit": True})
+    steps.append({"op": "exportpdf", "sheet": S1C, "path": os.path.join(workdir, "sheet_1c.pdf"), "area": "A1:N42", "landscape": True, "fit": True})
+    steps.append({"op": "exportpdf", "sheet": S1, "path": os.path.join(workdir, "sheet_1.pdf"), "area": "A1:L58", "fit": True})
+
     out = run_excel(steps, path, workdir)
     print(f"   Excel {out.get('excel_version')}：開く {out['open_ms']} ms、初回再計算 {out.get('calc_ms_first')} ms、"
           f"検査全体 {out['total_ms'] / 1000:.0f} 秒")
@@ -669,7 +1078,7 @@ def check_excel(ex, path, label, workdir, student):
     record(got_hidden == want_hidden, f"{label}：Excel で開けて、非表示シートが期待どおり", "、".join(sorted(got_hidden)))
     # --- 値 ---
     bands = [int(r[3]) for r in out["bands"]]
-    record(bands == ex.bands() == [295, 280, 236, 161], f"{label}：ステップ1の4バンド（Excel）{bands}")
+    record(bands == ex.bands() == [295, 279, 234, 156], f"{label}：ステップ1の4バンド（Excel）{bands}（期待 295・279・234・156 K）")
     s2 = {r[0]: r[1] for r in out["s2"]}
     ns, nl, ds, dl, r1, r = ex.density()
     vals = [x[1] for x in out["s2"]]
@@ -774,6 +1183,8 @@ def check_excel(ex, path, label, workdir, student):
     rng = out[key + "_rng"][0][0]
     rows, pts, _ = ex.top4("裏側・南極エイトケン（フォン・カルマン）", [0, 0, 0, 3, 0])
     record(rng == range_text4(pts), f"{label}：日付変更線をまたぐ領域の範囲表示：{rng}")
+
+    check_excel_dai2ji(ex, out, label, student, LINES_CHECK)
     # --- G10 チャートの位置 ---
     ch = out["chart1"][0]
     record(ch[1] == "$D$21", f"{label}：ステップ1のチャートは D21 起点（注意書き A19:H19 に重ならない）", f"{ch[1]}〜{ch[2]}")
