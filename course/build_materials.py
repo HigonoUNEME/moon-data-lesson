@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""3コマ版の紙教材（B1〜B5・B8・B9）をPDFで出力し、検査する。
+"""3コマ版の紙教材（B1〜B5・B4c・B8・B9）をPDFで出力し、検査する。
 
     python course/build_materials.py            # 出力して検査する
     python course/build_materials.py build      # 出力だけ
@@ -11,9 +11,10 @@
   B3  ミッションカード4種       A5・横（4ページ）
   B4a 地域カード8件             A4・縦（2ページ、1ページ4枚）
   B4b 地域カードの全球図（番号）A4・横（1ページ）
+  B4c クレーターカード（第2時。4枚）A4・縦（1ページ、A6×4。数値は書かない）
   B5a 黒板用の記入表            A3・横
   B5b 付箋用の月全球図          A3・横
-  B8  班編成・ペア確定シート    A4・縦（教員用）
+  B8  班編成・ペア確定シート    A4・縦（教員用。2ページ：1＝班編成・ペア、2＝第2時の担当クレーターの割当）
   B9  Web操作カード             A5・縦
 
 方針：紙は空欄を主とし、答え（半球・地域名とミッションの対応、標準の重み、想定値）は書かない。
@@ -111,14 +112,17 @@ L_PREDICT = "予想（地域タイプ・場所・理由）"
 L_NICHI = "日較差（赤道帯・極付近）"
 L_DENSITY = "海・陸の密度と倍率"
 L_SEARIKU = "海と陸の違い（1文）"
-L_SUMMARY2 = "第2時のまとめ（分かったこと）"
+L_MEMO = "第2時の判断メモ（画面の数字と理由を書く）"
 L_DECIDE = "最終決定（地域タイプ・1地点）"
 L_REASON = "選んだ理由（2文＋弱点1つ）"
 L_WEIGHTCHG = "重みを変えたときの変化（1行）"
 L_QA = "質疑メモ"
 L_REFLECT = "振り返り（予想と最終決定のずれ・理由）"
 L_DOUBT = "このデータで信じきれないこと"
-B1_FIELDS = [L_PREDICT_TEMP, L_PREDICT, L_NICHI, L_DENSITY, L_SEARIKU, L_SUMMARY2,
+# ⑥ の理由欄（判断の理由を一言。評価しない。地域タイプと線の内外の対応は紙に書かない）
+L_LINE_REASON = "線をそこに引いた理由（数字1つ）"
+L_IO_REASON = "内か外か、そう決めた理由（数字1つ）"
+B1_FIELDS = [L_PREDICT_TEMP, L_PREDICT, L_NICHI, L_DENSITY, L_SEARIKU, L_MEMO,
              L_DECIDE, L_REASON, L_WEIGHTCHG, L_QA, L_REFLECT, L_DOUBT]
 
 QUESTION_TYPES = ["なぜその指標？", "別の地域は考えた？", "そのデータは信じてよい？"]
@@ -486,6 +490,55 @@ def page_header(s, tag, with_mission=True):
     return y + 15 + 2.5
 
 
+def cbox(s, x, y, label, size=8.0):
+    """□ラベル。x,yは文字のベースライン。右端のxを返す。"""
+    s.rect(x, y - 2.7, 3.2, 3.2, lw=0.35, stroke=LINE)
+    s.text(x + 4.3, y, label, size)
+    return x + 4.3 + sw(label, size)
+
+
+def b1_memo(s, x0, w, y):
+    """⑥ 第2時の判断メモ（評価に入れない。画面の数字を写し、理由を一言書く。教員の確認印欄）。上端yから。下端のyを返す。"""
+    title = "⑥ " + L_MEMO
+    s.text(x0, y + 1.6, title, 8.5, ACCENT, bold=True)
+    s.text(x0 + sw(title, 8.5) + 2.0, y + 1.6, "評価には入れない", 6.8, SUB)
+    # 教員の確認印（小さな枠）
+    s.rect(x0 + w - 24, y - 2.4, 24, 7.6, lw=0.35, stroke=LINE, fill=WHITE, r=0.8, dash=(1.2, 0.8))
+    s.text(x0 + w - 22.6, y + 0.4, "教員確認印", 5.8, SUB)
+    y += 5.0
+    # (a) 判断①：線（ステップ1b）。数字は画面の値を写す
+    s.blank(x0 + 1, y + 3.6, 33, "(a) 線", 8.5, "°")
+    s.blank(x0 + 38, y + 3.6, 47, "内側の最大", 8.5, "％")
+    s.blank(x0 + 89, y + 3.6, 66, "使えなくなる月の面積", 8.5, "％")
+    y += 6.2
+    s.text(x0 + 3, y + 2.4, "ステップ1b　内側の最大＝線の内側で、最高が21〜3時に来る割合の最大（B9）／面積（B10）", 6.5, SUB)
+    y += 3.8
+    # (a) の理由（一言）
+    s.blank(x0 + 6, y + 3.6, 149, L_LINE_REASON, 8.0)
+    y += 6.7
+    # (b) 判断②：担当クレーター（ステップ1c）
+    s.blank(x0 + 1, y + 3.6, 84, "(b) 担当クレーター", 8.5)
+    s.blank(x0 + 89, y + 3.6, 66, "内部の夜の最低温度", 8.5, "K")
+    y += 6.9
+    lab = "帯の9割が入る範囲"
+    s.text(x0 + 6, y + 3.6, lab, 8.5)
+    lx = x0 + 6 + sw(lab, 8.5) + 1.2
+    s.line(lx, y + 4.4, lx + 14, y + 4.4, 0.35, LINE)
+    s.text(lx + 15.2, y + 3.6, "〜", 8.5)
+    s.line(lx + 20.5, y + 4.4, lx + 34.5, y + 4.4, 0.35, LINE)
+    s.text(lx + 36, y + 3.6, "K", 8.5)
+    s.text(x0 + 76, y + 3.6, "内部は範囲の", 8.0)
+    k = cbox(s, x0 + 76 + sw("内部は範囲の", 8.0) + 1.5, y + 3.6, "外")
+    k = cbox(s, k + 2.0, y + 3.6, "内")
+    s.text(k + 3.0, y + 3.6, "→　帯と", 8.0)
+    k = cbox(s, k + 3.0 + sw("→　帯と", 8.0) + 1.5, y + 3.6, "違う")
+    cbox(s, k + 2.0, y + 3.6, "違わない")
+    y += 6.7
+    # (b) の理由（一言）
+    s.blank(x0 + 6, y + 3.6, 149, L_IO_REASON, 8.0)
+    return y + 7.0
+
+
 def b1_page1(s):
     W = s.W
     x0, w = 10, s.W - 20
@@ -501,8 +554,8 @@ def b1_page1(s):
     s.line(x0 + 44, y + 7.1, x0 + 70, y + 7.1, 0.35, LINE)
     s.text(x0 + 71, y + 6.3, "℃ くらい。なぜなら", 8.5)
     s.line(x0 + 103, y + 7.1, x0 + w, y + 7.1, 0.35, LINE)
-    y = s.ruled(x0, y + 6.8, w, 2, 7.0) + 0.2
-    y += 1.5
+    y = s.ruled(x0, y + 6.8, w, 2, 6.6) + 0.2
+    y += 1.2
     # 予想
     s.text(x0, y + 1.6, "② " + L_PREDICT, 8.5, ACCENT, bold=True)
     s.text(x0 + sw("② " + L_PREDICT, 8.5) + 2.5, y + 1.6, "個人で先に書く（班で見せ合う前に）", 7, SUB)
@@ -512,16 +565,16 @@ def b1_page1(s):
     s.blank(x0 + 122, y + 3.8, 32, "経度", 8, "°")
     y += 5.4
     s.text(x0 + 1, y + 3.4, "理由（どの指標を重く見たか）", 8, SUB)
-    y = s.ruled(x0, y + 3.2, w, 5, 7.0) + 0.8
-    y += 2.0
+    y = s.ruled(x0, y + 3.2, w, 5, 6.5) + 0.6
+    y += 1.6
 
     # ---------------- 第2時
     s.bar(x0, y, w, 6, "第2時　温度と海陸のデータで、平均と群を比べる", 9.5)
-    y += 8.5
+    y += 8.0
     s.text(x0, y + 1.6, "③ " + L_NICHI, 8.5, ACCENT, bold=True)
     s.judge(x0 + w - 34, y - 2.2, "知")
     y += 4.2
-    s.text(x0 + 1, y + 3.8, "表計算ステップ1のAの表（4バンド）から、日較差の平均を読む", 7.2, SUB)
+    s.text(x0 + 1, y + 3.8, "表計算ステップ1のAの表（緯度の絶対値の4つの帯）から、日較差の平均を読む", 7.2, SUB)
     y += 5.0
     s.blank(x0 + 1, y + 3.8, 36, "赤道帯", 8.5, "K")
     s.blank(x0 + 40, y + 3.8, 36, "中緯度帯", 8.5, "K")
@@ -529,30 +582,28 @@ def b1_page1(s):
     s.blank(x0 + 118, y + 3.8, 36, "極付近", 8.5, "K")
     y += 6.6
     s.blank(x0 + 1, y + 3.8, 100, "日較差が大きいのは（赤道帯・極付近）", 8.5)
-    y += 8.0
+    y += 7.4
     s.rect(x0, y, w, 6.0, lw=0.3, stroke=RULE, fill=SOFT_BG, r=0.8)
     s.text(x0 + 2, y + 4.1, K_CELSIUS, 7.3, SUB)
-    y += 10.5
+    y += 9.6
     s.text(x0, y + 1.6, "④ " + L_DENSITY, 8.5, ACCENT, bold=True)
     s.judge(x0 + w - 34, y - 2.2, "知")
     y += 4.2
     s.blank(x0 + 1, y + 3.8, 34, "海の密度", 8.5)
     s.blank(x0 + 40, y + 3.8, 34, "陸の密度", 8.5)
     s.blank(x0 + 80, y + 3.8, 44, "陸は海の", 8.5, "倍")
-    y += 7.0
+    y += 6.6
     s.blank(x0 + 1, y + 3.8, 104, "USGS地質図の年代（数が大きいほど新しい）　海", 8)
     s.blank(x0 + 110, y + 3.8, 40, "陸", 8.5)
-    y += 10.0
+    y += 9.0
     s.text(x0, y + 1.6, "⑤ " + L_SEARIKU, 8.5, ACCENT, bold=True)
     s.text(x0 + sw("⑤ " + L_SEARIKU, 8.5) + 2.5, y + 1.6, "数値（密度・年代）を入れて書く", 7, SUB)
     s.judge(x0 + w - 34, y - 2.2, "思")
     y += 3.2
-    y = s.ruled(x0, y + 0.5, w, 4, 7.0) + 0.5
-    y += 3.0
-    s.text(x0, y + 1.6, "⑥ " + L_SUMMARY2 + "（一言）", 8.5, ACCENT, bold=True)
-    y += 3.2
-    y = s.ruled(x0, y + 0.5, w, 2, 7.0)
-    s.text(W / 2, 246.2, "B1 個人用ワークシート（表）　裏面は第3時", 6.5, SUB, align="c")
+    y = s.ruled(x0, y + 0.5, w, 3, 6.8) + 0.5
+    y += 1.6
+    y = b1_memo(s, x0, w, y)
+    s.text(W / 2, 247.6, "B1 個人用ワークシート（表）　裏面は第3時", 6.5, SUB, align="c")
     return y
 
 
@@ -720,16 +771,32 @@ def b2_front(s):
 
     # ===== 右：第2時
     y = y0
-    s.bar(mid, y, rw_, 7.5, "第2時　温度と海陸のデータで確かめる／重みの案", 12)
+    s.bar(mid, y, rw_, 7.5, "第2時　温度の線・クレーターの確かめ・海と陸・重みの案", 12)
     y += 10.5
     s.text(mid, y + 2.5, "ステップ1　緯度帯ごとの日較差の平均", 9, ACCENT, bold=True)
     s.text(mid + 64, y + 2.5, "（数値は表計算を見て、個人用ワークシートに書く）", 7.8, SUB)
     y += 5.0
     s.text(mid + 1, y + 2.8, "予想：赤道と極付近で、日較差が大きいのは", 9)
     s.line(mid + 68, y + 3.6, mid + 100, y + 3.6, 0.35, LINE)
-    y += 6.5
-    s.text(mid, y + 2.5, "班で話す：緯度が高くなると、日較差は？　極付近の値は信じてよい？", 8.4, SUB)
-    y = s.ruled(mid, y + 3.0, rw_, 4, 8.0) + 5.0
+    y += 8.0
+
+    # --- 判断①：帯を刻んで線を引く（ステップ1b）
+    s.text(mid, y + 2.5, "ステップ1b　帯を刻んで、使う緯度の上限（線）を決める", 9, ACCENT, bold=True)
+    s.text(mid + 94, y + 2.5, "（個人の線と数字は、個人用ワークシート⑥(a)に書く）", 7.8, SUB)
+    y += 5.6
+    s.blank(mid + 1, y + 3.4, 112, "班の線（黄色いセル B7 に入れた値）　緯度の絶対値", 9, "°")
+    y += 7.6
+    s.text(mid + 1, y + 2.5, "刻むと見えたこと（帯の幅を30→5→1°と変えて、グラフはどう変わった？）", 8.4, SUB)
+    y = s.ruled(mid, y + 3.0, rw_, 2, 8.0) + 5.0
+
+    # --- 判断②：クレーターと帯（ステップ1c）
+    s.text(mid, y + 2.5, "ステップ1c　担当クレーターの確かめ", 9, ACCENT, bold=True)
+    s.text(mid + 70, y + 2.5, "（数字は、個人用ワークシート⑥(b)に書く）", 7.8, SUB)
+    y += 5.6
+    s.blank(mid + 1, y + 3.4, 120, "担当クレーター（クレーターカードの名前）", 9)
+    y += 7.6
+    s.text(mid + 1, y + 2.5, "班で話す：24時間カーブの2本は、朝・昼・夕・夜の、どの時刻で近く、どの時刻で離れている？", 8.4, SUB)
+    y = s.ruled(mid, y + 3.0, rw_, 2, 8.0) + 5.0
 
     s.text(mid, y + 2.5, "ステップ2　海と陸のクレーター", 9, ACCENT, bold=True)
     s.text(mid + 52, y + 2.5, "（数値は表計算を見て、個人用ワークシートに書く）", 7.8, SUB)
@@ -737,25 +804,28 @@ def b2_front(s):
     s.text(mid + 1, y + 2.8, "予想：クレーターが少ないのは（海・陸）", 9)
     y += 6.5
     s.text(mid, y + 2.5, "班で話す：なぜ少ない？（落ちなかった？　落ちた後に消えた？）　地質図の年代と合っていた？", 8.4, SUB)
-    y = s.ruled(mid, y + 3.0, rw_, 4, 8.0) + 5.0
+    y = s.ruled(mid, y + 3.0, rw_, 2, 8.0) + 5.0
 
-    s.text(mid, y + 2.5, "重みの案（まず極端に：3と1など）。向きは表計算に表示される。重みは0〜5の整数", 9, ACCENT, bold=True)
+    s.text(mid, y + 2.5, "重みの案（まず極端に：3と1など）。「大きいほど良い／小さいほど良い」は表計算に表示される。重みは0〜5の整数", 9, ACCENT, bold=True)
     y += 4.5
-    cells = [["指標（ステップ4）", "○×", "重み", "理由"],
-             ["太陽高度", "", "", ""],
-             ["1日の温度差（日較差）", "", "", ""],
-             ["地球の仰角（表側）", "", "", ""],
-             ["地球の仰角（裏側）", "", "", ""],
-             ["夜の最低温度", "", "", ""]]
-    y = s.grid(mid, y, cw(rw_, [40, 11, 11, 50]), [6.5] + [8.4] * 5, cells, size=9, heads_left=1) + 3.0
+    s.text(mid, y + 2.5, "「根拠にした今日の数字」：今日、表計算で見た数字（個人用の③④⑥など）から、行ごとに1つ書く。", 8.2, SUB)
+    y += 4.0
+    wcols = cw(rw_, [34, 9, 9, 48, 54])
+    cells = [["指標（ステップ4）", "○×", "重み", "理由", "根拠にした今日の数字"],
+             ["太陽高度", "", "", "", ""],
+             ["1日の温度差（日較差）", "", "", "", ""],
+             ["地球の仰角（表側）", "", "", "", ""],
+             ["地球の仰角（裏側）", "", "", "", ""],
+             ["夜の最低温度", "", "", "", ""]]
+    y = s.grid(mid, y, wcols, [6.5] + [7.4] * 5, cells, size=9, heads_left=1) + 2.4
     s.text(mid, y + 3.0, "南極付近の班は、ステップ4bの4行で考える", 8.2, ACCENT, bold=True)
-    y += 4.8
-    cells = [["指標（ステップ4b）", "○×", "重み", "理由"],
-             ["日照率", "", "", ""],
-             ["永久影までの距離", "", "", ""],
-             ["永久影率", "", "", ""],
-             ["傾斜", "", "", ""]]
-    y = s.grid(mid, y, cw(rw_, [40, 11, 11, 50]), [6.5] + [8.4] * 4, cells, size=9, heads_left=1)
+    y += 4.4
+    cells = [["指標（ステップ4b）", "○×", "重み", "理由", "根拠にした今日の数字"],
+             ["日照率", "", "", "", ""],
+             ["永久影までの距離", "", "", "", ""],
+             ["永久影率", "", "", "", ""],
+             ["傾斜", "", "", "", ""]]
+    y = s.grid(mid, y, wcols, [6.5] + [7.4] * 4, cells, size=9, heads_left=1)
     s.text(W / 2, 291, "B2 班用ワークシート（表）　裏面は第3時", 7, SUB, align="c")
 
 
@@ -1026,6 +1096,62 @@ def build_b4b(regions):
 
 
 # =====================================================================
+# B4c クレーターカード（第2時の判断②。A4に4枚＝A6×4、切って班に1枚）
+# =====================================================================
+# 数値（内部・帯の温度）は書かない。生徒は表計算ステップ1cで読む。判定・年代・原因も書かない。
+CRATER_TERMS = [
+    ("内部", "中心を囲む四角（半径の半分ほど）の中の0.5度のセル。"),
+    ("同じ緯度の帯", "クレーターと同じ緯度（±1.5度）を、月を1周したもの（クレーターから経度が直径1つ分以上はなれたセルだけ）。"),
+    ("帯の9割が入る範囲", "帯の中のセルの9割が、この下端と上端の間に入る。"),
+]
+CRATER_STEPS = [
+    "表計算「ステップ1c」の黄色いセルB5で、このカードの名前を選ぶ。",
+    "24時間の温度カーブ（内部と帯の2本）を見る。",
+    "「夜の最低温度」の行の4つの数字（内部／帯の平均／帯の9割が入る範囲の下端・上端）を読む。",
+    "内部の値は、帯の9割が入る範囲の外か内か。個人用ワークシート⑥(b)に、数字と、そう決めた理由を書く。",
+]
+
+
+def build_b4c(craters):
+    c, s, path = new_canvas("B4c_クレーターカード.pdf", A4P)
+    cw_, ch = 105.0, 148.5
+    for k, name in enumerate(CRATER_NAMES):
+        lat, lon, dia = craters[name]
+        cx = (k % 2) * cw_
+        cy = (k // 2) * ch
+        s.rect(cx + 3, cy + 3, cw_ - 6, ch - 9, lw=0.8, stroke=ACCENT, r=3, dash=(3, 2))
+        s.text(cx + 9, cy + 11.5, "クレーターカード（第2時）", 7.5, SUB)
+        s.text(cx + cw_ - 9, cy + 11.5, "班", 7.5, SUB, align="r")
+        s.line(cx + cw_ - 40, cy + 12.2, cx + cw_ - 13, cy + 12.2, 0.35, LINE)
+        s.text(cx + 9, cy + 25.5, name, 22, ACCENT, bold=True)
+        yy = cy + 29.5
+        s.line(cx + 8, yy, cx + cw_ - 8, yy, 0.6, ACCENT)
+        yy += 4.0
+        s.text(cx + 9, yy + 4.0, "緯度　" + num(round(lat, 2)) + "°　経度　" + num(round(lon, 2)) + "°", 10.5, INK)
+        s.text(cx + 9, yy + 10.6, "直径　約" + num(round(dia)) + " km", 10.5, INK)
+        yy += 14.5
+        s.text(cx + 9, yy + 3.2, "やること（表計算）", 9.6, ACCENT, bold=True)
+        yy += 5.0
+        for i, st in enumerate(CRATER_STEPS, 1):
+            s.circle(cx + 12, yy + 2.5, 2.2, stroke=ACCENT, fill=ACCENT)
+            s.text(cx + 12, yy + 3.55, str(i), 7, WHITE, bold=True, align="c")
+            h = s.para(cx + 16.5, yy, cw_ - 28, st, 9.4, leading=12.8)
+            yy += max(6.5, h + 2.6)
+        yy += 1.5
+        s.line(cx + 8, yy, cx + cw_ - 8, yy, 0.3, RULE)
+        yy += 1.2
+        s.text(cx + 9, yy + 3.2, "ことば", 9.6, ACCENT, bold=True)
+        yy += 5.0
+        for term, desc in CRATER_TERMS:
+            h = s.para(cx + 9, yy, cw_ - 18, "<b>" + escape(term) + "</b>：" + escape(desc), 8.6, leading=11.8, raw=True)
+            yy += h + 2.0
+        s.text(cx + cw_ / 2, cy + ch - 8.0, "このカードに数字は書いていない。数字は表計算で読む。", 6.2, SUB, align="c")
+    c.showPage()
+    c.save()
+    return path
+
+
+# =====================================================================
 # B5 黒板用の記入表／付箋用の月全球図（A3・横）
 # =====================================================================
 def build_b5a():
@@ -1112,12 +1238,98 @@ RULES_B8 = [
     "班が奇数なら、3班の輪にする（X→Y→Z→X）。",
     "変更があれば、第3時の冒頭（0:03〜0:07）で確定する。",
 ]
-B8_EXAMPLE = [  # 班, ミッション, ジグソー地点（A〜E）, 地域カード番号（①〜⑧）, ペア
-    (1, "氷採掘", "C", "⑦", "3"), (2, "氷採掘", "D", "⑦", "4"),
-    (3, "電波天文台", "B", "⑥", "1"), (4, "電波天文台", "E", "⑥", "2"), (5, "電波天文台", "D", "⑤", "6"),
-    (6, "太陽光発電", "A", "①", "5"), (7, "太陽光発電", "C", "⑧", "8"), (8, "太陽光発電", "B", "①", "7"),
-    (9, "有人総合", "A", "①", "10"), (10, "有人総合", "E", "④", "9"),
+B8_EXAMPLE = [  # 班, ミッション, ジグソー地点（A〜E）, 地域カード番号（①〜⑧）, ペア, 第2時の担当クレーター
+    (1, "氷採掘", "C", "⑦", "3", "プトレマイオス"), (2, "氷採掘", "D", "⑦", "4", "アルフォンスス"),
+    (3, "電波天文台", "B", "⑥", "1", "ティコ"), (4, "電波天文台", "E", "⑥", "2", "プトレマイオス"),
+    (5, "電波天文台", "D", "⑤", "6", "ラングレヌス"),
+    (6, "太陽光発電", "A", "①", "5", "アルフォンスス"), (7, "太陽光発電", "C", "⑧", "8", "プトレマイオス"),
+    (8, "太陽光発電", "B", "①", "7", "ラングレヌス"),
+    (9, "有人総合", "A", "①", "10", "アルフォンスス"), (10, "有人総合", "E", "④", "9", "プトレマイオス"),
 ]
+
+# --- 第2時：担当クレーター（教員の1例はコペルニクス。担当は4つ。設計 §3.3）
+CRATER_NAMES = ["ティコ", "ラングレヌス", "プトレマイオス", "アルフォンスス"]
+CRATER_EXAMPLE_NAME = "コペルニクス"
+CRATER_SIDE = ["ティコ", "ラングレヌス"]     # B8 の運用で、班数を全班の30％以下に抑える2つ（教員用。生徒には見せない）
+CRATER_SHARE_MAX = 0.30
+# 班数別の割当の目安（設計 §3.3）：班数 → {クレーター: 班数}
+B8_CRATER_PLAN = {
+    8: {"ティコ": 1, "ラングレヌス": 1, "プトレマイオス": 3, "アルフォンスス": 3},
+    10: {"ティコ": 1, "ラングレヌス": 2, "プトレマイオス": 4, "アルフォンスス": 3},
+    12: {"ティコ": 1, "ラングレヌス": 2, "プトレマイオス": 5, "アルフォンスス": 4},
+}
+RULES_B8_CRATER = [
+    "担当は4つ（" + "・".join(CRATER_NAMES) + "）。教員の1例の「" + CRATER_EXAMPLE_NAME + "」は、班の担当にしない。",
+    "ティコ・ラングレヌスを担当する班は、全班の30％以下にする。",
+    "班が6以下で、30％以下にできないときは、ラングレヌスを割り当てない。",
+    "割当は、班番号で事前に決めて、クレーターカード（B4c）を班に1枚ずつ配る。",
+]
+SITE_SHEET = "データ_地点比較"
+
+
+def load_craters_xlsx():
+    """学習者版の『データ_地点比較』から、クレーターの名前・緯度・経度・直径を読む。"""
+    import openpyxl
+    wb = openpyxl.load_workbook(XLSX_PATH, data_only=True, read_only=True)
+    ws = wb[SITE_SHEET]
+    rows = {}
+    for i, r in enumerate(ws.iter_rows(values_only=True)):
+        if i == 0 or r[0] is None:
+            continue
+        rows[str(r[0])] = (float(r[1]), float(r[2]), float(r[3]))
+    wb.close()
+    return rows
+
+
+B8_STAMP_NOTE = ("全員分の確認印を、まとめの3分で押しきらない。印は班ごとに1枚か、抜き取りで押す。"
+                 "判断メモ（B1）の回収は第2時の終わりにまとめて行い、第3時の冒頭に返す。"
+                 "見るのは「数字が画面と合っているか」「理由の欄が書いてあるか」の2点だけ（判断の中身には正解を付けない。評価はしない）。"
+                 "この運用で時間が足りるかは未確認。")
+
+
+def b8_page2(s):
+    """B8 p2：第2時の担当クレーターの割当（教員用）。"""
+    W, H = A4P
+    s.text(10, 15, "第2時　担当クレーターの割当", 17, ACCENT, bold=True)
+    s.text(10 + sw("第2時　担当クレーターの割当", 17) + 4, 15, "教員用（生徒には配らない・映さない）", 10, SUB)
+    s.line(10, 18.5, W - 10, 18.5, 1.0, ACCENT)
+    y = 22
+    s.text(10, y + 3.5, "決め方の規則", 10.5, ACCENT, bold=True)
+    y += 6
+    for i, r in enumerate(RULES_B8_CRATER, 1):
+        s.circle(14.5, y + 3.2, 2.8, stroke=ACCENT, fill=ACCENT)
+        s.text(14.5, y + 4.4, str(i), 8.5, WHITE, bold=True, align="c")
+        hh_ = s.para(20, y + 0.6, W - 32, r, 10.5, leading=14)
+        y += max(7.2, hh_ + 2.4)
+    y += 2.0
+
+    s.text(10, y + 3.5, "班の数ごとの割当の目安（班数）", 10, ACCENT, bold=True)
+    y += 5.5
+    colw = [24] + [31] * 4 + [19, 23]
+    cells = [["班の数"] + CRATER_NAMES + ["ティコ＋\nラングレヌス", "割合"]]
+    for n, plan in B8_CRATER_PLAN.items():
+        side = sum(plan[k] for k in CRATER_SIDE)
+        cells.append([f"{n}班"] + [str(plan[k]) for k in CRATER_NAMES] + [str(side), f"{side / n * 100:.0f}％"])
+    y = s.grid(10, y, colw, [11] + [7.2] * len(B8_CRATER_PLAN), cells, size=9.5, head_size=8.5) + 2.0
+    s.text(10, y + 3.2, "どの班にどのクレーターを渡すかは、教員が班番号で事前に決める。上の数は目安。班の数がこれ以外のときは、規則2・3に合わせて決める。", 7.8, SUB)
+    y += 10.0
+
+    s.text(10, y + 3.5, "今回の割当（班の番号を書く）", 10, ACCENT, bold=True)
+    y += 5.5
+    colw = [40, 100, 24, 26]
+    cells = [["担当クレーター", "担当する班の番号", "班の数", "規則2の対象"]]
+    for k in CRATER_NAMES:
+        cells.append([k, "", "", "対象" if k in CRATER_SIDE else ""])
+    y = s.grid(10, y, colw, [7.5] + [11.0] * 4, cells, size=10) + 3.0
+    s.blank(10, y + 5.5, 190, "確認：ティコ＋ラングレヌスの班数（　　）÷ 全班の数（　　）＝", 10, "％（30％以下か）")
+    y += 14.0
+    s.text(10, y + 3.5, "班ごとの記録は、1ページ目の表の「第2時の担当クレーター」の列に書く。", 8.6, SUB)
+    y += 9.0
+    s.text(10, y + 3.5, "B1⑥（判断メモ）の確認印の運用（案）", 10, ACCENT, bold=True)
+    y += 5.5
+    h = s.para(10, y + 0.6, W - 20, B8_STAMP_NOTE, 9.5, leading=13.5)
+    y += h + 2.0
+    s.text(W / 2, 292, "B8 班編成・ペア確定シート（教員用）　2/2　第2時の担当クレーター", 6.5, SUB, align="c")
 
 
 def build_b8():
@@ -1142,10 +1354,11 @@ def build_b8():
 
     s.text(10, y + 3.5, "記入例（10班。ミッションは氷採掘2・電波天文台3・太陽光発電3・有人総合2。数字は例）", 10, ACCENT, bold=True)
     y += 5.5
-    colw = [13, 34, 26, 40, 22, 55]
-    cells = [["班", "ミッション", "ジグソー地点\n（A〜E）", "地域タイプ（第1時終了時）\n地域カード①〜⑧", "ペア\n（班）", "発表者\n（当日くじ）"]]
-    for b, m, j, t, p in B8_EXAMPLE:
-        cells.append([str(b), m, j, t, p, ""])
+    colw = [11, 27, 20, 33, 17, 33, 49]
+    HEAD = ["班", "ミッション", "ジグソー地点\n（A〜E）", "地域タイプ（第1時終了時）\n地域カード①〜⑧", "ペア\n（班）", "第2時の\n担当クレーター", "発表者\n（当日くじ）"]
+    cells = [HEAD]
+    for b, m, j, t, p, cr in B8_EXAMPLE:
+        cells.append([str(b), m, j, t, p, cr, ""])
     fl = {}
     rh = [11] + [6.8] * 10
     y = s.grid(10, y, colw, rh, cells, size=9, head_size=7.8, heads_left=0) + 1.5
@@ -1155,12 +1368,14 @@ def build_b8():
 
     s.text(10, y + 3.5, "記入欄", 10, ACCENT, bold=True)
     y += 5.5
-    cells = [["班", "ミッション", "ジグソー地点\n（A〜E）", "地域タイプ（第1時終了時）\n地域カード①〜⑧", "ペア\n（班）", "発表者\n（当日くじ）"]]
+    cells = [HEAD]
     for _ in range(12):
-        cells.append(["", "", "", "", "", ""])
+        cells.append(["", "", "", "", "", "", ""])
     rh = [11] + [7.6] * 12
     y = s.grid(10, y, colw, rh, cells, size=9, head_size=7.8)
-    s.text(W / 2, 292, "B8 班編成・ペア確定シート（教員用）", 6.5, SUB, align="c")
+    s.text(W / 2, 292, "B8 班編成・ペア確定シート（教員用）　1/2　裏面は第2時の担当クレーター", 6.5, SUB, align="c")
+    c.showPage()
+    b8_page2(s)
     c.showPage()
     c.save()
     return path
@@ -1283,9 +1498,10 @@ OUTPUTS = {
     "B3_ミッションカード.pdf": (A5L, 4),
     "B4a_地域カード.pdf": (A4P, 2),
     "B4b_地域カード_全球図.pdf": (A4L, 1),
+    "B4c_クレーターカード.pdf": (A4P, 1),
     "B5a_黒板用記入表.pdf": (A3L, 1),
     "B5b_付箋用月全球図.pdf": (A3L, 1),
-    "B8_班編成ペア確定シート_教員用.pdf": (A4P, 1),
+    "B8_班編成ペア確定シート_教員用.pdf": (A4P, 2),
     "B9_Web操作カード.pdf": (A5P, 2),
 }
 
@@ -1311,7 +1527,7 @@ def build_all():
     missing = [n for n in names if n not in REGION_LINES]
     if missing:
         raise SystemExit("REGION_LINES にない地域名：" + str(missing))
-    out = [build_b1(), build_b2(), build_b3(), build_b4a(xr), build_b4b(xr), build_b5a(), build_b5b(), build_b8()]
+    out = [build_b1(), build_b2(), build_b3(), build_b4a(xr), build_b4b(xr), build_b4c(load_craters_xlsx()), build_b5a(), build_b5b(), build_b8()]
     p9, yend = build_b9()
     out.append(p9)
     for p in out:
@@ -1441,14 +1657,28 @@ def check_all():
     mc = Counter(m for _, m, *_ in B8_EXAMPLE)
     rep(mc == {"氷採掘": 2, "電波天文台": 3, "太陽光発電": 3, "有人総合": 2}, f"B8 のミッション割当 {dict(mc)}")
     pair_ok = True
-    d = {b: (t, p) for b, m, j, t, p in B8_EXAMPLE}
+    d = {b: (t, p) for b, m, j, t, p, cr in B8_EXAMPLE}
     for b, (t, p) in d.items():
         if d[int(p)][1] != str(b) or d[int(p)][0] == t:
             pair_ok = False
     rep(pair_ok, "B8 の記入例：ペアが相互で、同じ地域タイプ同士がない")
-    jc = Counter(j for _, m, j, t, p in B8_EXAMPLE)
+    jc = Counter(j for _, m, j, t, p, cr in B8_EXAMPLE)
     rep(all(v == 2 for v in jc.values()) and set(jc) == set("ABCDE"), "B8 の記入例：ジグソーの地点は A〜E の5地点・各2班")
-    rep(all(re.fullmatch(r"[①-⑧]", t) for _, m, j, t, p in B8_EXAMPLE), "B8 の記入例：地域タイプは地域カードの番号（①〜⑧）")
+    rep(all(re.fullmatch(r"[①-⑧]", t) for _, m, j, t, p, cr in B8_EXAMPLE), "B8 の記入例：地域タイプは地域カードの番号（①〜⑧）")
+
+    # --- B8：第2時の担当クレーター（AC8：ティコ・ラングレヌスの班は全班の30％以下）
+    cc = Counter(cr for *_, cr in B8_EXAMPLE)
+    side_n = sum(cc[k] for k in CRATER_SIDE)
+    rep(set(cc) <= set(CRATER_NAMES) and CRATER_EXAMPLE_NAME not in cc, f"B8 の記入例：担当クレーターは4つのうちのどれか（教員の例のコペルニクスは担当にしない）{dict(cc)}")
+    rep(side_n <= CRATER_SHARE_MAX * len(B8_EXAMPLE) + 1e-9, f"B8 の記入例：ティコ・ラングレヌスの班が全班の30％以下（{side_n}/{len(B8_EXAMPLE)}）")
+    for n_, plan in B8_CRATER_PLAN.items():
+        sn = sum(plan[k] for k in CRATER_SIDE)
+        rep(sum(plan.values()) == n_ and sn <= CRATER_SHARE_MAX * n_ + 1e-9, f"B8 の班数別の目安（{n_}班）：合計が班数に一致し、ティコ・ラングレヌスが30％以下（{sn}/{n_}）")
+    rep(all(k in b8 for k in CRATER_NAMES) and "第2時の担当クレーター" in b8 and "30％以下" in b8 and "ラングレヌスを割り当てない" in b8,
+        "B8 に担当クレーターの列・割当の規則（30％以下・班が6以下のときの扱い）がある")
+    rep(re.sub(r"\s+", "", B8_STAMP_NOTE) in b8 and "確認印の運用" in b8 and "抜き取り" in b8 and "未確認" in b8,
+        "B8 p2 に確認印の運用の代案（班ごと・抜き取り、判断メモの回収は第2時の終わり。未確認の注記つき）")
+    rep("教員用" in b8 and "映さない" in b8, "B8 の割当のページに「教員用（生徒には配らない・映さない）」の表記")
 
     # --- B9
     b9 = pt("B9_Web操作カード.pdf")
@@ -1496,6 +1726,89 @@ def check_all():
     # --- S8：B5b の付箋の注（実寸から計算した値）
     b5b_t = pt("B5b_付箋用月全球図.pdf")
     rep("原寸" in b5b_t and "点シール" in b5b_t and "約25mm角" in b5b_t.replace(" ", ""), "B5b に付箋の大きさの注（原寸印刷・約25 mm角・点シール）")
+
+    # =================================================================
+    # 第2時の改訂（design_dai2ji_v2.md rev2。B1⑥・B2・B4c・B8・旧値の検査）
+    # =================================================================
+    # --- B1：⑥ 判断メモ（評価に入れない・画面の数字と理由・確認印）
+    k6 = b1.find("⑥第2時")
+    k6e = b1.find("B1個人用ワークシート（表）")
+    seg6 = b1[k6:k6e] if k6 >= 0 and k6e > k6 else ""
+    rep(re.sub(r"\s+", "", "⑥ " + L_MEMO) in b1 and "判断メモ" in b1 and "数字" in seg6, "B1 ⑥ が「判断メモ（画面の数字と理由を書く）」になっている")
+    rep("数字を2つ" not in b1 and "数字2つ" not in b1, "B1 に旧い見出し「数字を2つ（入れる）」がない（欄の数と合わない言い方を残さない）")
+    rep(all(w in seg6 for w in ["(a)線", "内側の最大", "使えなくなる月の面積", "(b)担当クレーター", "内部の夜の最低温度", "帯の9割が入る範囲",
+                                 "内部は範囲の", "違う", "違わない", "教員確認印", "評価には入れない"]),
+        "B1 ⑥ に (a)線・内側の最大・使えなくなる月の面積／(b)担当・内部・帯の9割が入る範囲・外内・違う違わない／確認印の枠／「評価には入れない」")
+    rep(re.sub(r"\s+", "", L_LINE_REASON) in seg6 and re.sub(r"\s+", "", L_IO_REASON) in seg6,
+        "B1 ⑥ に判断の理由を書く2つの欄（線の理由・内か外かの理由）がある")
+    rep("(c)" not in seg6 and "自班の地域タイプ" not in seg6 and "第3時のシート" not in seg6 and "ステップ4" not in seg6 and "4b" not in seg6
+        and "外側" not in seg6 and "内側" not in re.sub(r"ステップ1b.*?（B10）", "", seg6).replace("内側の最大", ""),
+        "B1 ⑥ に旧(c)（自班の地域タイプと線の内外・第3時のシート）がない（地域タイプと線の内外の対応を紙に書かない）")
+    rep("教員判定" not in seg6 and b1.count("教員判定") == 7, f"B1 ⑥ に教員判定欄を付けていない（教員判定は③④⑤⑧⑨⑩⑪の7つ。実際 {b1.count('教員判定')}）")
+    rep("第2時のまとめ" not in b1 and "分かったこと" not in b1, "B1 に旧⑥「第2時のまとめ（分かったこと）」が残っていない")
+    rep(all(re.sub(r"\s+", "", n) in b1 for n in [L_NICHI, L_DENSITY, L_SEARIKU, L_MEMO]), "B1 ③④⑤⑥の記録欄の名前がある（③④は不変）")
+    # 画面の語と紙の語の一致（学習者版の実物）
+    try:
+        import openpyxl
+        wbq = openpyxl.load_workbook(XLSX_PATH, data_only=True, read_only=True)
+        w1b, w1c = wbq["ステップ1b_帯を刻む"], wbq["ステップ1c_地点と帯"]
+        lab = {"1b A9": w1b["A9"].value, "1b A10": w1b["A10"].value, "1b A7": w1b["A7"].value, "1c D9": w1c["D9"].value,
+               "1c E9": w1c["E9"].value, "1c A10": w1c["A10"].value, "1c A5": w1c["A5"].value}
+        wbq.close()
+        rep("21〜3時" in lab["1b A9"] and "使えなくなる月の面積" in lab["1b A10"] and "線" in lab["1b A7"] and "帯の9割が入る範囲" in lab["1c D9"]
+            and "夜の最低温度" in lab["1c A10"] and "担当" in lab["1c A5"],
+            "表計算の実物（1b：B9・B10・B7、1c：B10:E10・B5）の語が、紙の語（21〜3時・使えなくなる月の面積・線・帯の9割が入る範囲・夜の最低温度・担当）と一致")
+    except Exception as e:                                           # noqa
+        rep(False, f"表計算の実物の語の確認に失敗：{e}")
+
+    # --- B2：第2時の欄（線・クレーター・根拠にした今日の数字）、旧い欄の削除
+    rep(all(w in b2 for w in ["ステップ1b", "班の線", "刻むと見えたこと", "ステップ1c", "担当クレーター"]), "B2 に班の線・刻むと見えたこと・担当クレーターの欄")
+    rep(b2.count("根拠にした今日の数字") >= 2 and "見直" not in b2, f"B2 の重みの案の表に「根拠にした今日の数字」の列（ステップ4・4bの2表。{b2.count('根拠にした今日の数字')}か所）。「見直す」の行はない")
+    rep("極付近の値は信じてよい" not in b2 and b2.count("信じてよい") == 1, "B2 に旧い問い「極付近の値は信じてよい？」がない（残る「信じてよい？」は第3時の質問の型の1か所だけ）")
+    rep(b1.count("信じてよい") == 1, "B1 の「信じてよい？」は第3時の質問の型（⑩）の1か所だけ")
+
+    # --- B4c：クレーターカード
+    b4c = pt("B4c_クレーターカード.pdf")
+    cr_xlsx = load_craters_xlsx()
+    rep(all(n in cr_xlsx for n in CRATER_NAMES) and CRATER_EXAMPLE_NAME in cr_xlsx, "B4c：担当4つ＋教員の例が、表計算『データ_地点比較』の地点名にある")
+    rep(all(n in b4c for n in CRATER_NAMES) and CRATER_EXAMPLE_NAME not in b4c, "B4c にクレーター4つの名前（教員の例のコペルニクスは入れない）")
+    rep(all(("緯度" + num(round(cr_xlsx[n][0], 2)) + "°") in b4c and ("経度" + num(round(cr_xlsx[n][1], 2)) + "°") in b4c
+            and ("直径約" + num(round(cr_xlsx[n][2])) + "km") in b4c for n in CRATER_NAMES), "B4c の緯度・経度・直径が、『データ_地点比較』と一致")
+    rep(all(w in b4c for w in ["ステップ1c", "B5", "⑥(b)", "夜の最低温度", "帯の9割が入る範囲", "同じ緯度の帯", "内部"]), "B4c に手順（ステップ1c・B5・⑥(b)）とことば（内部・同じ緯度の帯・帯の9割が入る範囲）")
+    try:
+        import openpyxl
+        wbq = openpyxl.load_workbook(XLSX_PATH, data_only=True, read_only=True)
+        rows_ = list(wbq[SITE_SHEET].iter_rows(values_only=True))
+        wbq.close()
+        ix = {h: i for i, h in enumerate(rows_[0])}
+        leak = []
+        for r in rows_[1:]:
+            for col in ("inner_tmin", "band_tmin", "band_tmin_p5", "band_tmin_p95"):
+                s_ = f"{round(float(r[ix[col]]), 1):.1f}"
+                if s_ in b4c:
+                    leak.append((r[0], col, s_))
+        rep(not leak, f"B4c に、表計算の数字（内部・帯の夜の最低温度・9割の下端上端）が書かれていない{('（検出：' + str(leak) + '）') if leak else ''}")
+    except Exception as e:                                           # noqa
+        rep(False, f"B4c の数字の混入検査に失敗：{e}")
+
+    # --- 新しい禁止語（設計 §7.1 の「出さない」語。答え・原因の語。紙の全PDF）
+    NEW_BANNED = ["平らな地面", "斜面", "作り方", "本当の姿", "分かっていません", "データの限界", "信頼できない", "信頼できる", "岩が多い", "冷めにくい",
+                  "極域のデータを信じ", "崩れ"]
+    for fn in OUTPUTS:
+        t_ = pt(fn)
+        bad = [w for w in NEW_BANNED if w in t_]
+        rep(not bad, f"{fn}：第2時の答え・原因の語なし{('（検出：' + ','.join(bad) + '）') if bad else ''}")
+    # B1⑥・B2・B4c：判断の正解・判定の語
+    for nm_, t_ in (("B1⑥", seg6), ("B2", b2), ("B4c", b4c)):
+        bad = [w for w in ["判定", "若い", "新しい", "OK", "NG", "合格", "正解"] if w in t_]
+        rep(not bad, f"{nm_}：判断の正解・判定の語なし{('（検出：' + ','.join(bad) + '）') if bad else ''}")
+
+    # --- 旧い数字（295・280・236・161・差134 K）が、全PDFにない（AC6）
+    for fn in OUTPUTS:
+        t_ = pt(fn)
+        old = re.findall(r"(?<![\d.])(?:295|280|236|161)(?![\d.])", t_) + re.findall(r"差は?約?134", t_)
+        rep(not old, f"{fn}：旧い4バンドの値（295・280・236・161）・旧い差（134）なし{('（検出：' + ','.join(old) + '）') if old else ''}")
+    rep("要注意" not in b1 and "要注意" not in b2, "B1・B2 に旧い呼び名「極付近（要注意）」がない")
 
     # --- ミッション語の走査（B3 と、教員用の B8 を除く全PDF）
     #   許容：ミッション名そのものが要る B3（ミッションカード）と、教員用の B8（班ごとのミッション割当を書く）。
