@@ -5,7 +5,7 @@
 
 出力：docs/teacher_guide_3koma.pdf（A4）
 mdの全文を機械的に変換する（md と PDF がずれないようにするため）。
-対応する記法：# 見出し（表題）、## / ### 見出し、表、- 箇条書き（「- □」はチェック欄）、1. 番号つき、
+対応する記法：# 見出し（表題）、## / ### / #### 見出し、表、- 箇条書き（「- □」はチェック欄）、1. 番号つき、
 > 引用、**強調**、`コード`、セル内の <br>。
 docs/build_lesson_plan_pdf.py（指導案PDF）の変換の考え方を流用した、独立のスクリプト。
 フォント：notebooks/assets/NotoSansJP-Regular.ttf（絵文字・「≒」「✔」は描画できないので、md側でも使わない）
@@ -47,6 +47,8 @@ S = {
                          leftIndent=0, spaceBefore=9, spaceAfter=5, borderPadding=(2.5, 4, 2.5, 5)),
     "h2": ParagraphStyle("h2", fontName="NotoJP", wordWrap="CJK", fontSize=9.6, leading=13, textColor=ACCENT, spaceBefore=6,
                          spaceAfter=2.5),
+    "h3": ParagraphStyle("h3", fontName="NotoJP", wordWrap="CJK", fontSize=8.8, leading=12, textColor=INK, spaceBefore=5,
+                         spaceAfter=2, leftIndent=0, borderPadding=(0, 0, 0, 0)),
     "body": ParagraphStyle("body", fontName="NotoJP", wordWrap="CJK", fontSize=BODY, leading=BODY * 1.5, textColor=INK, spaceAfter=3),
     "quote": ParagraphStyle("quote", fontName="NotoJP", wordWrap="CJK", fontSize=BODY - 0.4, leading=12.5, textColor=SUB,
                             leftIndent=8, spaceAfter=3),
@@ -120,7 +122,10 @@ def to_story(lines, avail):
             story.append(make_table(rows, avail))
             story.append(Spacer(1, 2.5 * mm))
             continue
-        if s.startswith("### "):
+        if s.startswith("#### "):
+            story.append(CondPageBreak(30 * mm))
+            story.append(Paragraph("<b>" + inline(s[5:]) + "</b>", S["h3"]))
+        elif s.startswith("### "):
             story.append(CondPageBreak(38 * mm))   # 見出しだけがページ末に残らないように
             story.append(Paragraph(inline(s[4:]), S["h2"]))
         elif s.startswith("## "):

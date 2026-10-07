@@ -29,3 +29,6 @@ tools/_cache/
 # webapp/react: build_moon_textures.py がダウンロードする月面モザイクの生TIFFキャッシュ
 # （成果物 public/textures/moon_lroc_color_{4k,8k}.jpg はコミットする）
 webapp/react/scripts/_cache/
+
+# 内部の節（学校が特定されうる記述）を含む指導案の原本。公開するのは現場教員版の docs/lesson_plan_3koma.md／.pdf
+docs/lesson_plan_3koma_draft.md

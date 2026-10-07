@@ -198,9 +198,27 @@ def footer(canvas, doc):
     canvas.restoreState()
 
 
+MD_OUT_PATH = os.path.join(ROOT, "docs", "lesson_plan_3koma.md")
+
+
+def write_public_md(lines):
+    """現場教員版の節だけを md として書き出す（公開リポジトリに置く版）。
+    元の docs/lesson_plan_3koma_draft.md には内部の節（学校が特定されうる記述）が含まれるので、
+    そちらは公開しない（.gitignore）。"""
+    out = ["# 学習指導案（現場教員版・案）：月データでムーンベースの場所を決めよう（探究基礎・全3時間）", "",
+           "> 未実施。時間配分・操作時間は机上の見積もりで、リハーサルによる検証は未実施。準拠する学習指導要領の科目は理数探究基礎。"
+           "評価規準は公式文言ではなく案。節番号は元の指導案のままで、欠番の節（根拠の詳細・所見・検証経緯など）は内部資料のため省いている。", ""]
+    for ln in selected_lines(lines):
+        out.append(clean(ln))
+    with open(MD_OUT_PATH, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(out) + "\n")
+    print("wrote", MD_OUT_PATH)
+
+
 def build():
     with open(SRC_PATH, encoding="utf-8") as f:
         lines = f.read().split("\n")
+    write_public_md(lines)
     avail = A4[0] - 36 * mm
     doc = SimpleDocTemplate(
         OUT_PATH, pagesize=A4,
