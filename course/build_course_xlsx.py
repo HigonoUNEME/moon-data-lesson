@@ -13,7 +13,7 @@
                                           # ＋学習者版を Excel で再計算して保存した版にする（配付用・リポジトリ用）
 
 出力:
-  course/course_moonbase.xlsx                  教員版（原本。答え・標準の重みの例を含む）
+  course/course_moonbase.xlsx                  教員版（原本。答え・要素の組合せ例を含む）
   course/student/course_moonbase_student.xlsx  学習者版（答えにあたる記述・セルを除いたもの）
 
 配付用の学習者版（計算結果を保存した版）の作り方:
@@ -21,7 +21,7 @@
   値が空欄に見える。そこで、配付・リポジトリ用の学習者版は次の手順で作る（Windows＋Excel が必要）。
     1. python course/build_course_data.py regions      # 地域名の表示名を反映（通常は不要。済み）
     2. python course/build_course_xlsx.py --recalc     # 教員版と学習者版を出し、学習者版を再計算版に置き換える
-    3. python course/check_course_xlsx.py --all        # 答え語・ミッション語・個人情報・構造・Excel 実機の検査
+    3. python course/check_course_xlsx.py --all        # 答え語・要素名の語・個人情報・構造・Excel 実機の検査
   再計算は course/recalc_xlsx_with_excel.py（Excel を COM で動かし、全再計算→別名保存→
   利用者名 lastModifiedBy・保存先パス absPath・作成者を除去）。Excel で直接上書き保存すると
   利用者名と保存先パスが xlsx に入るので、リポジトリに置く版では行わない。
@@ -37,6 +37,13 @@ v4.0 の改修（要件定義 A1〜A4）:
   A2 入力検証（C5 のプルダウン、重みは 0〜5 の整数、状態表示セル）
   A3 上位10の同点重複の解消（教員版・学習者版とも）
   A4 上位10の範囲（緯度・経度／4b は日照率・傾斜・永久影までの距離）の自動表示
+
+要素ごとの分析と重み（docs/design_yoso_v3.md rev2）の改修:
+  ・ステップ4の C5 のプルダウンの先頭に「月全体（線の内側）」を足した（非表示列 M5:M13 の一覧。名前 AreaChoices・AllMoon・LineOK）。
+    選ぶと、『緯度の絶対値が線以下のマス』（マス中心）だけを採点する。線は新しい黄色セル C4（学習者版は空欄）。
+    正規化は データ_環境 J〜N（全球固定）のまま。O 列の『採点する行』の条件だけが変わる。
+  ・学習者版の既定の重みは C8（電力＝太陽高度の行）＝1（ステップ4・4b）。上位10の表に『夜の最低温度』の列（H）を足した。
+  ・旧い呼び名の『ミッション』は『要素』に置き換えた（教員版の組合せ例は月全体の例・4bの例。数値は _top_all / _top_4b で再計算）。
 
 同点重複の原因（A3）:
   上位10の表は、順位 k のスコアを LARGE で、その行を MATCH(…,0) で引いていた。
@@ -88,6 +95,10 @@ INFILL = PatternFill("solid", fgColor="FFF6E9")   # 生徒が入力するセル
 WRAP = Alignment(wrap_text=True, vertical="top")
 
 TIE_EPS = "0.000000000001"   # 1E-12。順位用列で ROW() に掛ける（A3）
+ALL_MOON = "月全体（線の内側）"   # ステップ4 C5 のプルダウンの先頭（非表示列 M5。名前 AllMoon）
+TEACHER_LINE = 70             # 教員版のステップ4 C4（線）の既定。学習者版は空欄
+NORM5 = ["norm_sun_high", "norm_amp_low", "norm_earth_high", "norm_earth_low", "norm_night_warm"]
+NORM4B = ["norm_illum", "norm_near_shadow", "norm_low_psf", "norm_low_slope"]
 REG_FAR_EQ = "裏側・赤道（月の裏側の赤道帯）"   # 3コマ版の表示名（build_course_data.py の DISPLAY_NAMES と同じ）
 N_REGIONS = 8                 # データ_地域 の行数（名前のプルダウンの範囲）
 
@@ -154,6 +165,36 @@ def _fit_notes(ws, slack=0.92):
         cur = ws.row_dimensions[rng.min_row].height or 0
         if h > cur:
             ws.row_dimensions[rng.min_row].height = h
+
+
+def _first_rank(score, k=1):
+    """順位用列（ROUND(スコア,10)−ROW()×1E-12）で上位 k 行の位置を返す（同点は行番号の小さい順）。score は NaN＝採点しない行"""
+    import numpy as np
+    s = np.asarray(score, dtype=float)
+    rows = np.arange(2, len(s) + 2)
+    p = np.where(np.isnan(s), np.nan, np.round(s, 10) - rows * float(TIE_EPS))
+    ok = np.where(~np.isnan(p))[0]
+    return list(ok[np.argsort(-p[ok], kind="stable")][:k])
+
+
+def _top_all(env_df, line, w, k=1):
+    """ステップ4『月全体（線の内側）』の上位 k 行 [(緯度, 経度)…]（教員版の例と検査用。O 列の式と同じ）"""
+    import numpy as np
+    m = (env_df["lat"].abs() <= line).values
+    s = sum(wi * env_df[c].values for wi, c in zip(w, NORM5)) / max(1, sum(w))
+    idx = _first_rank(np.where(m, s, np.nan), k)
+    return [(float(env_df["lat"].values[i]), float(env_df["lon"].values[i])) for i in idx]
+
+
+def _top_4b(ps_df, w, k=1):
+    """ステップ4b の上位 k 行 [(緯度, 経度)…]"""
+    s = sum(wi * ps_df[c].values for wi, c in zip(w, NORM4B)) / max(1, sum(w))
+    idx = _first_rank(s, k)
+    return [(float(ps_df["lat"].values[i]), float(ps_df["lon"].values[i])) for i in idx]
+
+
+def _fmt_pt(p):
+    return f"（{p[0]:.1f}, {p[1]:.1f}）"
 
 
 def add_data_sheet(wb, csv_name, sheet_name, student=False):
@@ -525,6 +566,12 @@ def build(student: bool = False):
     # 地域名のプルダウン用の名前（データ_地域 の A 列）
     wb.defined_names["RegionNames"] = DefinedName(
         "RegionNames", attr_text=f"データ_地域!$A$2:$A${REG_N}")
+    # ステップ4 C5 のプルダウン用の名前。非表示列 M5:M13＝先頭に『月全体（線の内側）』＋ データ_地域 の8件（M6:M13 はリンク）。
+    #   AllMoon＝M5（定数の文字列はここだけ）／LineOK＝M14（C4 の線が 50〜90 の整数ならその値、そうでなければ空文字）
+    wb.defined_names["AreaChoices"] = DefinedName(
+        "AreaChoices", attr_text=f"{S4R}!$M$5:$M${5 + N_REGIONS}")
+    wb.defined_names["AllMoon"] = DefinedName("AllMoon", attr_text=f"{S4R}!$M$5")
+    wb.defined_names["LineOK"] = DefinedName("LineOK", attr_text=f"{S4R}!$M${6 + N_REGIONS}")
     # クレーター名のプルダウン用の名前（データ_地点比較 の A 列。ステップ1c の B5）
     wb.defined_names["SiteNames"] = DefinedName(
         "SiteNames", attr_text=f"データ_地点比較!$A$2:$A${len(sc_df) + 1}")
@@ -534,13 +581,17 @@ def build(student: bool = False):
     # データ_環境 の列: A lat B lon C 区分 D age_index E temp_amp_K F night_min_K
     #   G noon_sun_elev_deg H earth_elev_deg I region
     #   J norm_sun_high K norm_amp_low L norm_earth_high M norm_earth_low N norm_night_warm
-    #   → O スコア（表示用。選んだ地域の行だけ）／P 順位用（同点を行番号で解く。A3）
+    #   → O スコア（表示用。選んだ範囲の行だけ）／P 順位用（同点を行番号で解く。A3）
+    #   O の『採点する行』＝ C5 が『月全体（線の内側）』なら |緯度| が線以下のマス（マス中心）、
+    #   地域名なら region が C5 と一致する行。J〜N は全球固定の 0〜1（範囲で正規化し直さない）。
     #   （全球傾斜 slope_deg は Python 版・data/site_environment.csv 側。表計算版は 5 指標）
     env_ws.cell(row=1, column=15, value="スコア").font = BOLD
     env_ws.cell(row=1, column=16, value="順位用（同点を行番号で解く）").font = BOLD
     for r in range(2, E_N + 1):
         env_ws.cell(row=r, column=15, value=(
-            f'=IF(AND({S4R}!$C$5<>"",$I{r}={S4R}!$C$5,SUM({S4R}!$C$8:$C$12)>0),'
+            f'=IF(AND(SUM({S4R}!$C$8:$C$12)>0,'
+            f'OR(AND({S4R}!$C$5=AllMoon,ISNUMBER(LineOK),ABS($A{r})<=LineOK),'
+            f'AND({S4R}!$C$5<>"",{S4R}!$C$5<>AllMoon,$I{r}={S4R}!$C$5))),'
             f'({S4R}!$C$8*J{r}+{S4R}!$C$9*K{r}+{S4R}!$C$10*L{r}'
             f'+{S4R}!$C$11*M{r}+{S4R}!$C$12*N{r})'
             f'/MAX(1,{S4R}!$C$8+{S4R}!$C$9+{S4R}!$C$10+{S4R}!$C$11+{S4R}!$C$12),"")'))
@@ -585,61 +636,76 @@ def build(student: bool = False):
             (S1B, "（第2時）緯度の帯の幅を変えて、グラフを見て、使う緯度の上限（線）を決める"),
             (S1C, "（第2時）担当のクレーターの内部と、同じ緯度の帯の温度を比べる"),
             ("ステップ2_海と陸", "（第2時）『海』と『陸』でクレーターの数（密度）はどう違う？ 地質図と合っている？"),
-            ("ステップ4_地域を選ぶ", "（第2時の終わり・第3時）地域タイプを選び、5つの指標に重みをつけて、"
-                                "その中でいちばんよい場所を点数で決める"),
-            ("ステップ4b_スコア", "（第3時）南極を選んだ班：4つの指標に重みをつけて、点数で決める"),
-            ("データ_地域", "地域タイプの名前と範囲（ステップ4の C5 に入れる名前）"),
+            ("ステップ4_地域を選ぶ", "（第2時の終わり・第3時）採点する範囲（『月全体（線の内側）』、または地域タイプ）を選び、"
+                                "5つの指標に重みをつけて、その範囲でいちばんよい場所を点数で決める"),
+            ("ステップ4b_スコア", "（第3時）水を1番にした班：4つの指標に重みをつけて、点数で決める"),
+            ("データ_地域", "地域タイプの名前と範囲（ステップ4の C5 の一覧に出る名前）"),
             ("データ_◯◯ / 参考", "分析のもとデータ（前処理済み）。作り方は course/build_course_data.py"),
         ]):
             ws.cell(row=13 + i, column=1, value=nm).font = BOLD
             ws.cell(row=13 + i, column=2, value=desc).font = BODY
+        # 入力の順（ステップ4。C4 は画面ではC5の上にあるが、入れる順は C5 が先）
+        ws.cell(row=21, column=1, value="ステップ4の入力の順").font = BOLD
+        ws.cell(row=21, column=2, value="① C5（採点する範囲）→ ② C4（線。『月全体（線の内側）』を選んだときだけ）→ ③ 重み（C8〜C12）"
+                ).font = BODY
         ws.column_dimensions["A"].width = 24
         ws.column_dimensions["B"].width = 62
+        _fit_notes(ws)
+        ws.row_dimensions[6].height = 92     # ①〜⑤の5行が印刷・表示で切れない高さ（⑤＝上書き保存しない）
     else:
         _title(ws, "【教員用】月データでムーンベースの場所を決めよう（Excel版）")
-        ws["A2"] = ("教員用：答え・標準の重みの例・ミッションと地域の対応が入っています。生徒には配らないでください"
+        ws["A2"] = ("教員用：答え・要素の組合せ例（1番・2番と1位）が入っています。生徒には配らないでください"
                     "（配付用は course/student/course_moonbase_student.xlsx）")
         ws["A2"].font = Font(name="Yu Gothic", size=10, bold=True, color="A93226")
         _note(ws, "月の公開データ（温度・クレーター・極域の日照と傾斜・地質図）を Excel で分析して、"
                   "「月面基地をどこに建てるか」を自分で決めます。コードは書きません。"
                   "セルの数式を見て、黄色いセルの数字を書き換えて、結果をワークシートに記録します。", 3)
-        _h2(ws, "1. ミッションを1つ選ぶ（ワークシートに○）", 5)
-        ws["A6"], ws["B6"] = "ミッション", "基地に必要なこと"
+        _h2(ws, "1. 基地の要素と、表計算の行（重みの置き方）", 5)
+        ws["A6"], ws["B6"] = "要素", "区分・点の置き方・表計算の行"
         ws["A6"].font = ws["B6"].font = BOLD
         for i, (m, need) in enumerate([
-            ("☀ 太陽光発電基地", "よく日が当たること。地面が平らなこと"),
-            ("🔭 電波天文台", "地球の電波が届かないこと（＝月の裏側）。温度が安定していること"),
-            ("❄ 氷採掘基地", "氷がありそうなこと（ずっと日が当たらない永久影のそば）。平らなこと"),
-            ("🏠 有人総合基地", "電力・温度・氷・地球との通信をバランスさせること"),
+            ("電力", "共通。必ず1点（1番・2番にはしない）。ステップ4＝太陽高度の行／4b＝日照率の行"),
+            ("建設", "共通。1番にはしない（検算で傾斜を読む）。ステップ4に行なし／4b＝傾斜の行（水を1番にした班は2番〔2点〕にしてよい）"),
+            ("温度", "班が分析。1番＝3点、2番＝2点。ステップ4＝日較差の行と夜の最低温度の行"
+                   "（変換表：1番＝日較差2・夜1、2番＝日較差1・夜1）／4bに行なし"),
+            ("通信", "班が分析。1番＝3点、2番＝2点。ステップ4＝地球の仰角（表側）の行（裏側の行は0）／4bに行なし"),
+            ("水", "班が分析。1番＝3点。4b＝永久影までの距離の行（4bで1番にできるのは水だけ）／ステップ4に行なし"),
+            ("（観測）", "教員用の発展。ステップ4の地球の仰角（裏側）の行＝通信の鏡像。授業では使わない"),
         ]):
             ws.cell(row=7 + i, column=1, value=m).font = BODY
             ws.cell(row=7 + i, column=2, value=need).font = BODY
-        _note(ws, "同じデータでも、ミッションが変われば「最適な場所」は変わります。"
-                  "氷採掘は南極に、電波天文台は裏側に、通信重視なら表側に――行き先は半球ごと変わります。", 12)
+            ws.cell(row=7 + i, column=2).alignment = WRAP
+            ws.row_dimensions[7 + i].height = 30
+        _note(ws, "同じデータでも、何を重視するかで答えが変わります。使うシートは1番で決まります："
+                  "水を1番にした班＝ステップ4b、それ以外＝ステップ4で C5『月全体（線の内側）』を選び、C4 に線（第2時で引いた線）を入れる。"
+                  "電力は1点で入れてあります（学習者版は C8＝1）。", 13)
 
-        _h2(ws, "2. 進め方（各ステップ共通）", 13)
+        _h2(ws, "2. 進め方（各ステップ共通）", 15)
         _note(ws, "① まずワークシートに『予想』を書く（数式を見る前に）\n"
                   "② 黄色いセルの数字を書き換えて、結果（青いセル）を読む\n"
-                  "③ ワークシートに結果と『気づいたこと』を書く", 14)
+                  "③ ワークシートに結果と『気づいたこと』を書く", 16)
 
-        _h2(ws, "3. シートの並び", 18)
+        _h2(ws, "3. シートの並び", 20)
         for i, (nm, desc) in enumerate([
             ("ステップ1_温度", "月の1日の温度は緯度でどう変わる？ 緯度の平均を、どこまで使う？"),
             (S1B, "緯度の帯の幅を変えて、グラフを見て、使う緯度の上限（線）を決める（判断①）"),
             (S1C, "担当のクレーターの内部と、同じ緯度の帯の温度を比べる（判断②）"),
             ("ステップ2_海と陸", "『海』と『陸』でクレーターの数・大きさ・年代はどう違う？ 地質図と合っている？"),
             ("ステップ3_月全体", "月全体で環境を見る（日較差・地球の仰角・太陽高度）。どこも『全部で一番』にはならない"),
-            ("ステップ4_地域を選ぶ", "ミッションに合う地域タイプを選び、その中でいちばんよい場所を点数で決める"),
-            ("ステップ4b_南極", "（氷採掘・南極を選んだ班）南極の日照・傾斜・永久影を細かく見る"),
-            ("ステップ5_まとめ", "各ミッションの答え（南極・裏側・表側…）と実在の計画を見比べる"),
+            ("ステップ4_地域を選ぶ", "採点する範囲（月全体〔線の内側〕、または地域タイプ）を選び、その範囲でいちばんよい場所を点数で決める"),
+            ("ステップ4b_南極", "（探索用）南極の日照・傾斜・永久影を細かく見る"),
+            ("ステップ4b_スコア", "（水を1番にした班）南極の4つの指標に重みをつけて、点数で決める"),
+            ("ステップ5_まとめ", "各班の1番・使った範囲・1位を見比べる。実在の計画は、どの要素を重んじたかで読む"),
             ("データ_◯◯ / 参考", "分析のもとデータ（前処理済み）。作り方は course/build_course_data.py"),
         ]):
-            ws.cell(row=19 + i, column=1, value=nm).font = BOLD
-            ws.cell(row=19 + i, column=2, value=desc).font = BODY
+            ws.cell(row=21 + i, column=1, value=nm).font = BOLD
+            ws.cell(row=21 + i, column=2, value=desc).font = BODY
         _note(ws, "参考：同じ分析を Python（pandas）で書くと？ は notebooks/course_moonbase.ipynb にあります。"
-                  "Excel でやったことと数値がそろうように作ってあります。", 29)
+                  "Excel でやったことと数値がそろうように作ってあります。", 32)
         ws.column_dimensions["A"].width = 24
         ws.column_dimensions["B"].width = 62
+        _fit_notes(ws)
+        ws.row_dimensions[16].height = 60    # ①〜③の3行が切れない高さ
     _fit_notes(ws)
 
     # ================= ステップ1：温度 =================
@@ -889,56 +955,91 @@ def build(student: bool = False):
     else:
         _note(ws, "気づき：『温度が安定』『地球が見える』『日がよく当たる』が全部そろう地域はあった？　"
                   "南極は日較差が小さいが太陽高度は？　裏側は地球の仰角が負（＝地球が地平線の下）。"
-                  "あなたのミッションで、いちばん大事な列はどれ？", 22)
+                  "担当の要素で、いちばん大事な列はどれ？", 22)
     ws.column_dimensions["A"].width = 32
     for c in "BCDE":
         ws.column_dimensions[c].width = 16
     _fit_notes(ws)
 
-    # ================= ステップ4：地域を選んで評価する =================
+    # ================= ステップ4：採点する範囲（月全体の線の内側、または地域タイプ）を選んで評価する =================
     ws = wb.create_sheet(S4R)
-    _title(ws, "ステップ4：地域タイプを選んで、ミッションに合わせて評価する")
+    _title(ws, "ステップ4：採点する範囲を選んで、重みをつけて評価する")
     if student:
-        _note(ws, "『データ_地域』にある地域タイプから1つ選び（C5 をクリックして一覧から選ぶ）、"
+        _note(ws, "採点する範囲を1つ選び（C5 をクリックして一覧から選ぶ。一覧の先頭は『月全体（線の内側）』、その下が『データ_地域』の地域タイプ）、"
                   "5つの指標を 0〜1 に直して重みをつけて合計する（＝あなたのスコア式）。"
-                  "『データ_環境』の O 列『スコア』が、選んだ地域の行だけ自動で計算される。", 3)
+                  "『月全体（線の内側）』を選んだときは、C4 に線（第2時で引いた線）を入れる。"
+                  "『データ_環境』の O 列『スコア』が、選んだ範囲の行だけ自動で計算される。", 3)
     else:
-        _note(ws, "『データ_地域』からミッションに合う地域タイプを1つ選び（C5 の一覧から選ぶ）、"
+        _note(ws, "採点する範囲を1つ選び（C5 の一覧から選ぶ。先頭は『月全体（線の内側）』、その下が『データ_地域』の地域タイプ）、"
                   "5つの指標を 0〜1 に直して重みをつけて合計する（＝あなたのスコア式）。"
-                  "『データ_環境』の O 列『スコア』が、選んだ地域の行だけ自動で計算される。", 3)
-    ws["A5"] = ("選んだ地域タイプ（C5 をクリックして一覧から選ぶ）" if student
-                else "選んだ地域タイプ（『データ_地域』の name をそのまま）")
+                  "月全体を選んだときは、C4 の線（|緯度| の上限。マス中心が線以下のマスを採点する）を使う。0〜1 への直し方は全球固定で、線を変えても変わらない。"
+                  "『データ_環境』の O 列『スコア』が、選んだ範囲の行だけ自動で計算される。", 3)
+    # C4：線（新しい黄色セル。月全体を選ぶときだけ使う。学習者版は空欄で配る）
+    ws["A4"] = ("線 [°]（C5 が『月全体（線の内側）』のときだけ。温度のデータを使う範囲として、第2時で引いた線。50〜90 の整数）" if student
+                else "線 [°]（C5 が『月全体（線の内側）』のときだけ。温度のデータを使う範囲として、第2時で引いた線。50〜90 の整数）")
+    ws["A4"].font = BODY
+    ws["A4"].alignment = WRAP
+    ws.merge_cells("A4:B4")
+    ws.row_dimensions[4].height = 44
+    _input(ws, "C4", None if student else TEACHER_LINE)
+    dv_line = DataValidation(type="whole", operator="between", formula1="50", formula2="90",
+                             allow_blank=True, showErrorMessage=True, showInputMessage=True, errorStyle="stop",
+                             errorTitle="線の入れかた", error="線は 50〜90 の整数（緯度の絶対値 [°]）で入れてください。",
+                             promptTitle="線 [°]", prompt="50〜90 の整数。温度のデータを使う範囲（この緯度の絶対値まで）")
+    ws.add_data_validation(dv_line)
+    dv_line.add("C4")
+    ws["A5"] = ("採点する範囲（C5 をクリックして一覧から選ぶ）" if student
+                else "採点する範囲（C5 の一覧から選ぶ。『月全体（線の内側）』か、『データ_地域』の name をそのまま）")
     ws["A5"].font = BODY
+    ws["A5"].alignment = WRAP
+    ws.merge_cells("A5:B5")
+    ws.row_dimensions[5].height = 30 if student else 44
     _input(ws, "C5", None if student else "赤道の海（静かの海）")
 
-    # A2：C5 は『データ_地域』の名前のプルダウン
-    dv = DataValidation(type="list", formula1="RegionNames", allow_blank=True,
+    # 非表示列 M：プルダウンの一覧。M5＝月全体（定数の文字列はここだけ）、M6:M13＝データ_地域 のリンク、M14＝LineOK（式の中で名前で使う）
+    ws["M5"] = ALL_MOON
+    for i in range(N_REGIONS):
+        ws[f"M{6 + i}"] = f"=データ_地域!A{2 + i}"
+    ws[f"M{6 + N_REGIONS}"] = '=IFERROR(IF(AND(ISNUMBER($C$4),$C$4>=50,$C$4<=90,$C$4=INT($C$4)),$C$4,""),"")'
+    ws.column_dimensions["M"].hidden = True
+
+    # C5 は AreaChoices（先頭＝月全体、続けて データ_地域 の名前）のプルダウン
+    dv = DataValidation(type="list", formula1="AreaChoices", allow_blank=True,
                         showErrorMessage=True, showInputMessage=True, errorStyle="stop",
-                        errorTitle="地域名が違います",
-                        error="『データ_地域』にある名前を、一覧から選んでください。",
-                        promptTitle="地域タイプ", prompt="クリックして、一覧から1つ選ぶ")
+                        errorTitle="範囲の名前が違います",
+                        error="一覧にある名前（『月全体（線の内側）』か『データ_地域』の地域タイプ）を選んでください。",
+                        promptTitle="採点する範囲", prompt="クリックして、一覧から1つ選ぶ")
     ws.add_data_validation(dv)
     dv.add("C5")
 
-    # A2：状態表示セル（A6）。C5・重みの状態を1行で出す
+    # 状態表示セル（A6）。C5・C4・重みの状態を1行で出す。先頭の文は従来のまま（既存の検査が見る）
     sum_w = "SUM($C$8:$C$12)"
+    bad_w = f"OR(MIN($C$8:$C$12)<0,MAX($C$8:$C$12)>5,SUMPRODUCT(--($C$8:$C$12<>INT($C$8:$C$12)))>0)"
+    n_lat = f"COUNTIFS(データ_環境!$A$2:$A${E_N},\"<=\"&LineOK,データ_環境!$A$2:$A${E_N},\">=\"&-LineOK)"
     ws["A6"] = (
-        '=IFERROR(IF($C$5="","地域タイプを選んでください（C5 をクリックすると一覧が出ます）",'
-        'IF(COUNTIF(RegionNames,$C$5)=0,"【注意】C5 の地域名が『データ_地域』にありません。一覧から選んでください",'
+        '=IFERROR(IF($C$5="","地域タイプを選んでください（C5 をクリックすると一覧が出ます。月全体で採点するときは『月全体（線の内側）』）",'
+        'IF(COUNTIF(AreaChoices,$C$5)=0,"【注意】C5 の地域名が『データ_地域』にありません。一覧から選んでください",'
+        'IF($C$5=AllMoon,'
+        'IF(NOT(ISNUMBER(LineOK)),"【注意】月全体で採点するには、C4 に線（50〜90 の整数。第2時で引いた線）を入れてください",'
+        f'IF({sum_w}=0,"【注意】重みがすべて0です。どれかを1以上にしてください",'
+        f'IF({bad_w},"【注意】重みは0〜5の整数で入れてください",'
+        'IF(SUM($C$9:$C$12)=0,"【注意】太陽高度の行だけでは、同じ点数の場所が大量に出ます。ほかの行にも重みを置いてください",'
+        f'"OK　月全体（線 "&LineOK&"° の内側）　採点対象 "&{n_lat}&" 行　（重みの合計 "&{sum_w}&"）"'
+        '&IF($C$8=0,"　※太陽高度の行が0です",""))))),'
         'IF(LEFT($C$5,2)="南極","南極は『ステップ4b_スコア』を使います（ここのトップ10は参考にしない）",'
         f'IF({sum_w}=0,"【注意】重みがすべて0です。どれかを1以上にしてください",'
-        f'IF(OR(MIN($C$8:$C$12)<0,MAX($C$8:$C$12)>5,SUMPRODUCT(--($C$8:$C$12<>INT($C$8:$C$12)))>0),'
+        f'IF({bad_w},'
         '"【注意】重みは0〜5の整数で入れてください",'
-        f'"OK　採点対象 "&COUNTIF(データ_環境!$I$2:$I${E_N},$C$5)&" 行　（重みの合計 "&{sum_w}&"）"))))),'
+        f'"OK　採点対象 "&COUNTIF(データ_環境!$I$2:$I${E_N},$C$5)&" 行　（重みの合計 "&{sum_w}&"）")))))),'
         '"【注意】重みの欄に数字以外が入っています")')
     ws["A6"].font = BOLD
     _status_format(ws, "A6")
 
     _h2(ws, "A. あなたのスコア式：重み（黄色いセル。0なら気にしない。0〜5の整数）", 7)
-    # 学習者版：向きだけ。「（発電）」「（通信できる）」「（電波が静か・天文台）」などの用途は書かない
+    # 学習者版：向きだけ。「（発電）」「（通信できる）」などの用途は書かない。C8（電力＝太陽高度の行）は 1 で配る
     if student:
         w_rows = [
-            ("太陽高度 noon_sun_elev_deg", "高いほどよい", 0),
+            ("太陽高度 noon_sun_elev_deg", "高いほどよい", 1),
             ("1日の温度差 temp_amp_K", "小さいほどよい", 0),
             ("地球の仰角 earth_elev_deg（表側）", "高いほどよい", 0),
             ("地球の仰角 earth_elev_deg（裏側）", "低いほどよい", 0),
@@ -946,10 +1047,10 @@ def build(student: bool = False):
         ]
     else:
         w_rows = [
-            ("太陽高度 noon_sun_elev_deg", "高いほどよい（発電）", 2),
-            ("1日の温度差 temp_amp_K", "小さいほどよい（熱の安定）", 2),
+            ("太陽高度 noon_sun_elev_deg", "高いほどよい（電力）", 2),
+            ("1日の温度差 temp_amp_K", "小さいほどよい（温度の安定）", 2),
             ("地球の仰角 earth_elev_deg（表側）", "高いほどよい（通信できる）", 0),
-            ("地球の仰角 earth_elev_deg（裏側）", "低いほどよい（電波が静か・天文台）", 0),
+            ("地球の仰角 earth_elev_deg（裏側）", "低いほどよい（観測用。授業では使わない）", 0),
             ("夜の最低温度 night_min_K", "高いほどよい（夜に冷えすぎない）", 0),
         ]
     for i, (label, good, w) in enumerate(w_rows):
@@ -966,31 +1067,56 @@ def build(student: bool = False):
     ws["B13"].font = BLUE
 
     if not student:
-        _h2(ws, "B. ミッションごとの選び方（一例。C5 と重みを入れ直して使う）", 15)
-        ws["A16"], ws["B16"], ws["C16"] = "ミッション", "選ぶ地域タイプ", "重み（太陽・温度差・地球表・地球裏・夜）"
-        for c in "ABC":
-            ws[c + "16"].font = BOLD
-        for i, (m, reg, w) in enumerate([
-            ("☀ 太陽光発電", "赤道の海（静かの海） か 南極", "2・2・0・0・1"),
-            ("🔭 電波天文台", REG_FAR_EQ, "0・2・0・3・0"),
-            ("📡 通信中継", "赤道の海（静かの海）", "1・1・3・0・0"),
-            ("🏠 有人総合", "いくつか試す（＋ステップ4b）", "1・2・1・0・1"),
-            ("❄ 氷採掘", "南極 → ステップ4b へ（永久影は環境データに無い）", "―"),
-        ]):
+        # 月全体の例（教員版のみ）。数値は env_grid.csv から _top_all で再計算（検査スクリプトは別に pandas で再現して突き合わせる）
+        SETS = [("A 温度を1番", (1, 2, 0, 0, 1)), ("B 通信を1番", (1, 0, 3, 0, 0)),
+                ("C 温度を1番＋通信を2番", (1, 2, 2, 0, 1)), ("D 通信を1番＋温度を2番", (1, 1, 3, 0, 1))]
+        base = {nm: {ln: _top_all(env_df, ln, w)[0] for ln in range(50, 91)} for nm, w in SETS}
+        _h2(ws, "B. 月全体の例（一例。C5＝月全体、C4＝線、重みを入れ直して使う。1位は再計算した値）", 15)
+        for c, h in zip("ABCDEF", ("設定（電力は1点）", "重み（太陽・温度差・地球表・地球裏・夜）", "1位の緯度（線50〜88）",
+                                   "1位の経度", "電力を0にすると（線70）", "線を90にすると")):
+            ws[f"{c}16"] = h
+            ws[f"{c}16"].font = BOLD
+            ws[f"{c}16"].alignment = WRAP
+        ws.row_dimensions[16].height = 44
+        for i, (nm, w) in enumerate(SETS):
             r = 17 + i
-            ws[f"A{r}"] = m
-            ws[f"B{r}"] = reg
-            ws[f"C{r}"] = w
-            for c in "ABC":
+            b = base[nm][70]
+            assert all(base[nm][ln] == b for ln in range(50, 89)), "線50〜88で1位が変わった：月全体の例の文を見直す"
+            ws[f"A{r}"] = nm
+            ws[f"B{r}"] = "・".join(str(x) for x in w)
+            ws[f"C{r}"], ws[f"D{r}"] = b
+            ws[f"E{r}"] = _fmt_pt(_top_all(env_df, 70, (0,) + w[1:])[0])
+            ws[f"F{r}"] = _fmt_pt(base[nm][90])
+            for c in "ABCDEF":
                 ws[f"{c}{r}"].font = BODY
+        ws["E16"].alignment = WRAP
+        # 線ごとの1位の動き（A・C の電力0は線で動く）と、教員の一言の材料
+        a0 = {ln: _top_all(env_df, ln, (0, 2, 0, 0, 1))[0] for ln in range(50, 91)}
+        c0 = {ln: _top_all(env_df, ln, (0, 2, 2, 0, 1))[0] for ln in range(50, 91)}
+
+        def _runs(d):
+            out, lo = [], 50
+            for ln in range(51, 92):
+                if ln == 91 or d[ln] != d[lo]:
+                    out.append(f"{lo}〜{ln - 1}：{_fmt_pt(d[lo])}")
+                    lo = ln
+            return "／".join(out)
+
+        _note(ws, "線ごとの1位（電力1点）：A＝" + _runs(base["A 温度を1番"]) + "。B・C・D は線50〜90で同じ。"
+                  "試行(a) 1番を替える：A⇄B（"
+                  + _fmt_pt(base["A 温度を1番"][70]) + "⇄" + _fmt_pt(base["B 通信を1番"][70]) + "）、C⇄D（"
+                  + _fmt_pt(base["C 温度を1番＋通信を2番"][70]) + "⇄" + _fmt_pt(base["D 通信を1番＋温度を2番"][70]) + "）。", 21)
+        _note(ws, "電力を0にすると、A は線で動く：" + _runs(a0) + "。C は" + _runs(c0)
+                  + "。B・D は動かない。電力1点と夜1点が、線の効きを消している。"
+                  "上位10のスコアは重みが違う班どうしで比べない。", 22)
 
     _h2(ws, ("B. スコアの高い順トップ10（C5・重みを変えると入れ替わる）" if student
              else "C. スコアの高い順トップ10（C5・重みを変えると入れ替わる）"), 24)
     E_SCORE = f"データ_環境!$O$2:$O${E_N}"
     E_RANK = f"データ_環境!$P$2:$P${E_N}"     # 順位用（同点を行番号で解く）
-    ws["A25"], ws["B25"], ws["C25"], ws["D25"], ws["E25"], ws["F25"], ws["G25"] = (
-        "順位", "スコア", "緯度", "経度", "日較差 [K]", "太陽高度 [度]", "地球の仰角 [度]")
-    for c in "ABCDEFG":
+    ws["A25"], ws["B25"], ws["C25"], ws["D25"], ws["E25"], ws["F25"], ws["G25"], ws["H25"] = (
+        "順位", "スコア", "緯度", "経度", "日較差 [K]", "太陽高度 [度]", "地球の仰角 [度]", "夜の最低温度 [K]")
+    for c in "ABCDEFGH":
         ws[c + "25"].font = BOLD
     for k in range(1, 11):
         r = 25 + k
@@ -1002,29 +1128,43 @@ def build(student: bool = False):
         ws[f"E{r}"] = f'=IFERROR(INDEX(データ_環境!$E$2:$E${E_N},{m}),"")'
         ws[f"F{r}"] = f'=IFERROR(INDEX(データ_環境!$G$2:$G${E_N},{m}),"")'
         ws[f"G{r}"] = f'=IFERROR(INDEX(データ_環境!$H$2:$H${E_N},{m}),"")'
-        for c in "BCDEFG":
+        ws[f"H{r}"] = f'=IFERROR(INDEX(データ_環境!$F$2:$F${E_N},{m}),"")'
+        for c in "BCDEFGH":
             ws[f"{c}{r}"].font = BLUE
-    # A4：上位10の範囲（日付変更線をまたぐ領域は経度の範囲を出さない）
+    # 上位10の範囲。月全体では上位10が離れた場所に散らばるので日付変更線の文は出さず、散らばりの注意と、
+    # 1位が線のいちばん外側のマスのときの確認の一文を出す（地域モードは従来どおり）
     ws["A36"] = "上位10の範囲"
     ws["A36"].font = BOLD
     ws["B36"] = (
         '=IF(COUNT(C26:C35)=0,"",'
+        'IF($C$5=AllMoon,'
+        '"緯度 "&TEXT(MIN(C26:C35),"0.0")&" 〜 "&TEXT(MAX(C26:C35),"0.0")&" °　／　経度 "&TEXT(MIN(D26:D35),"0.0")&" 〜 "&TEXT(MAX(D26:D35),"0.0")&" °"'
+        '&IF(MAX(D26:D35)-MIN(D26:D35)>180,"　（経度が広く散らばっています。10行を1つずつ見ます）","")'
+        '&IF(ABS(C26)>=LineOK-3,"　【確認】1位が線のいちばん外側のマスにあります。線を少し内側にして確かめます",""),'
         '"緯度 "&TEXT(MIN(C26:C35),"0.0")&" 〜 "&TEXT(MAX(C26:C35),"0.0")&" °　／　"&'
         'IF(MAX(D26:D35)-MIN(D26:D35)>180,"経度は日付変更線をまたぐので範囲を出しません",'
-        '"経度 "&TEXT(MIN(D26:D35),"0.0")&" 〜 "&TEXT(MAX(D26:D35),"0.0")&" °"))')
+        '"経度 "&TEXT(MIN(D26:D35),"0.0")&" 〜 "&TEXT(MAX(D26:D35),"0.0")&" °")))')
     ws["B36"].font = BLUE
     if student:
-        _note(ws, "気づき：選んだ地域のトップ10は、どんな特徴をもっている？　"
+        _note(ws, "気づき：選んだ範囲のトップ10は、どんな特徴をもっている？　"
                   "重みを変えると、トップ10はどう変わった？（変える前の結果は、紙に写しておく）", 37)
-        for r in range(15, 23):      # 学習者版には「ミッションごとの選び方」の表は作らない。行を隠す
+        for r in range(15, 23):      # 学習者版には教員版の『月全体の例』の表は作らない。行を隠す
             ws.row_dimensions[r].hidden = True
     else:
-        _note(ws, "気づき：選んだ地域のトップの場所は、どんな特徴？　"
-                  "☀太陽光は『赤道の海』と『南極』の両方で試して、明るさ（太陽高度）と熱の安定を比べる。"
-                  "🔭電波天文は『地球の仰角（裏側）』の重みを大きくすると、経度180度あたりが上位に来る。", 37)
+        _note(ws, "気づき（教員用）：月全体の上位10は、温度を1番にした設定（A）では離れた複数の場所に分かれ、通信を1番にした設定（B・D）では1か所に集まる"
+                  "（北と南で同点のときは、表示は南が先）。B36 に【確認】が出たら、1位が線のそばにある＝選んだのは重みではなく線。"
+                  "線を5°動かして確かめる。スコアは、重みが違う班どうしで比べない。", 37)
     ws.column_dimensions["A"].width = 34
     for c in "BCDEFG":
         ws.column_dimensions[c].width = 14
+    ws.column_dimensions["C"].width = 20      # C5 の『月全体（線の内側）』が黄色いセルに収まる幅
+    ws.column_dimensions["H"].width = 16
+    if not student:
+        ws.column_dimensions["B"].width = 34      # 重みの行の『高いほどよい（…）』が切れない幅
+        ws.column_dimensions["E"].width = 22
+        ws.column_dimensions["F"].width = 20
+        ws.row_dimensions[4].height = 38
+        ws.row_dimensions[5].height = 38
     _fit_notes(ws)
 
     # ================= ステップ4b：南極の日照と傾斜 =================
@@ -1105,20 +1245,20 @@ def build(student: bool = False):
 
     # ================= ステップ4b：南極のスコア =================
     ws = wb.create_sheet(S4B)
-    _title(ws, "ステップ4b：南極で、ミッションごとにいちばんよい場所を点数で決める")
+    _title(ws, "ステップ4b：南極で、重みをつけて、いちばんよい場所を点数で決める")
     if student:
-        _note(ws, "（南極の地域タイプを選んだ班が使う）『データ_南極』の4つの指標を 0〜1 の点数に直して、"
+        _note(ws, "（水を1番にした班が使う）『データ_南極』の4つの指標を 0〜1 の点数に直して、"
                   "重みをつけて合計する（＝あなたのスコア式）。重みは黄色いセルで変える（0〜5の整数）。"
                   "地域名の入力（ステップ4の C5）は要らない。", 3)
     else:
-        _note(ws, "（氷採掘・南極を選んだ班向け）『データ_南極』の4つの指標を 0〜1 の点数に直して、"
+        _note(ws, "（水を1番にした班向け。南極のシートを使う）『データ_南極』の4つの指標を 0〜1 の点数に直して、"
                   "重みをつけて合計する（＝あなたのスコア式）。重みは黄色いセルで変える。", 3)
     _h2(ws, "A. あなたのスコア式：重み（黄色いセル。0なら「気にしない」。0〜5の整数）", 6)
     ws["A7"], ws["B7"], ws["C7"] = "指標", "どちらが良い？", "重み"
     for c in "ABC":
         ws[c + "7"].font = BOLD
     weights = [
-        ("日照率 (illum)", "高いほどよい", 0 if student else 3),
+        ("日照率 (illum)", "高いほどよい", 1 if student else 3),
         ("永久影までの距離 (km_to_shadow)", "近いほどよい", 0),
         ("永久影率 (permanent_shadow_fraction)", "低いほどよい", 0),
         ("傾斜 (slope_deg)", "低いほどよい", 0 if student else 2),
@@ -1147,23 +1287,27 @@ def build(student: bool = False):
     _status_format(ws, "A13")
 
     if not student:
-        _h2(ws, "B. ミッションごとの重み（ワークシートに書く。上の黄色いセルに入れ直して使う）", 14)
-        ws["A15"], ws["B15"], ws["C15"], ws["D15"], ws["E15"] = (
-            "ミッション", "日照", "永久影まで", "永久影率", "傾斜")
-        for c in "ABCDE":
-            ws[c + "15"].font = BOLD
-        for i, (m, w) in enumerate([
-            ("☀ 太陽光発電基地", (3, 0, 0, 2)),
-            ("❄ 氷採掘基地", (0, 3, 0, 2)),
-            ("🏠 有人基地", (2, 2, 1, 2)),
-        ]):
+        # 水を1番にした班の例（教員版のみ）。電力＝日照率の行は1点。数値は polar_south_sites.csv から _top_4b で再計算
+        _h2(ws, "B. 水を1番にした班の例（一例。上の黄色いセルに入れ直して使う。1位は再計算した値）", 14)
+        for c, h in zip("ABCDEFG", ("設定（電力＝日照率は1点）", "日照", "永久影まで", "永久影率", "傾斜", "1位の緯度", "1位の経度")):
+            ws[f"{c}15"] = h
+            ws[f"{c}15"].font = BOLD
+        import numpy as np
+        ex4b = [("水を1番", (1, 3, 0, 0)), ("水を1番＋傾斜を2番", (1, 3, 0, 2)),
+                ("（試行）電力を0にする", (0, 3, 0, 0)), ("（試行）電力を0＋傾斜を2番", (0, 3, 0, 2))]
+        for i, (m, w) in enumerate(ex4b):
             r = 16 + i
             ws[f"A{r}"] = m
             ws[f"A{r}"].font = BODY
             for c, v in zip("BCDE", w):
                 ws[f"{c}{r}"] = v
                 ws[f"{c}{r}"].font = BODY
-        _note(ws, "※これは一例。自分のミッションで「何を重く見るか」を考えて、A の黄色いセルに入れて使う。", 20)
+            ws[f"F{r}"], ws[f"G{r}"] = _top_4b(ps_df, w)[0]
+            ws[f"F{r}"].font = ws[f"G{r}"].font = BODY
+        s0 = sum(wi * ps_df[c].values for wi, c in zip((0, 3, 0, 0), NORM4B)) / 3
+        n_tie = int((np.round(s0, 10) == np.round(s0, 10).max()).sum())
+        _note(ws, f"水を1番にした班は、このシートを使う（4b で1番にできるのは水だけ）。傾斜（建設）は2番〔2点〕にしてよい。"
+                  f"電力を0にした（0,3,0,0）は {n_tie} 地点が同点（スコア1.000）で、1位は行の順で決まっただけ＝試行にしない。", 20)
 
     _note(ws, "『データ_南極』シートの右端（L 列）に『スコア』列があり、A の重みで自動計算される"
               "（M 列は、同点の地点を行の順に並べるための列）。"
@@ -1201,10 +1345,10 @@ def build(student: bool = False):
     if student:
         _note(ws, "気づき：トップ10の日照率・傾斜・永久影までの距離は、重みとどう対応している？　"
                   "重みを変えると順位はどう動いた？（変える前の結果は、紙に写しておく）", 37)
-        for r in range(14, 21):      # 学習者版には「ミッションごとの重み」の表は作らない。行を隠す
+        for r in range(14, 21):      # 学習者版には教員版の『水を1番にした班の例』の表は作らない。行を隠す
             ws.row_dimensions[r].hidden = True
     else:
-        _note(ws, "気づき：あなたのミッションのトップの場所は、どんな特徴（日照・傾斜・永久影までの距離）？　"
+        _note(ws, "気づき：トップの場所は、どんな特徴（日照・傾斜・永久影までの距離）？　"
                   "日照を重くすると傾斜は？　両方を同時に満たす場所はあった？　重みを変えると順位はどう動く？", 37)
     ws.column_dimensions["A"].width = 34
     ws.column_dimensions["B"].width = 14
@@ -1219,22 +1363,22 @@ def build(student: bool = False):
         _title(ws, "ステップ5：まとめ")
         _note(ws, "（配付版では内容を省いてある。全体共有で使う資料は教員が見せる）", 3)
     else:
-        _title(ws, "ステップ5：各ミッションの答えと実在の計画を見比べる")
-        _note(ws, "各班が、選んだ地域タイプとトップの場所（緯度・経度）を下の表に書き写す。"
-                  "同じ月・同じデータなのに、ミッションによって答えは『半球ごと』変わったはず。", 3)
+        _title(ws, "ステップ5：各班の1番・使った範囲・1位と、実在の計画を見比べる")
+        _note(ws, "各班が、1番に置いた要素・使った範囲（月全体／4b）とトップの場所（緯度・経度）を下の表に書き写す。"
+                  "同じ月・同じデータなのに、1番に置いた要素によって答えが分かれたはず。", 3)
         ws["A6"], ws["B6"], ws["C6"], ws["D6"], ws["E6"] = (
-            "ミッション", "選んだ地域タイプ", "トップの緯度", "トップの経度", "どの半球？")
+            "班の選択（1番・2番）", "使った範囲（月全体／4b）", "トップの緯度", "トップの経度", "線 [°]")
         for c in "ABCDE":
             ws[c + "6"].font = BOLD
-        for i, m in enumerate(["☀ 太陽光発電基地", "🔭 電波天文台", "❄ 氷採掘基地", "🏠 有人総合基地"]):
+        for i, m in enumerate(["温度を1番にした班", "通信を1番にした班", "温度を1番・通信を2番にした班", "水を1番にした班"]):
             r = 7 + i
             ws[f"A{r}"] = m
             ws[f"A{r}"].font = BODY
             for c in "BCDE":
                 _input(ws, f"{c}{r}", "")
 
-        _h2(ws, "B. 実在の計画は、ミッションで半球がちがう", 12)
-        ws["A13"], ws["B13"], ws["C13"], ws["D13"] = "計画", "半球", "要件", "参考：地球の仰角"
+        _h2(ws, "B. 実在の計画は、どの要素を重んじたか（出典は実施時に確認）", 12)
+        ws["A13"], ws["B13"], ws["C13"], ws["D13"] = "計画", "場所", "重んじた要素・要件", "参考：地球の仰角"
         for c in "ABCD":
             ws[c + "13"].font = BOLD
         for i, (nm, where, req, ee) in enumerate([
@@ -1251,7 +1395,7 @@ def build(student: bool = False):
             for c in "ABCD":
                 ws[f"{c}{r}"].font = BODY
 
-        _h2(ws, "C. NASA Artemis III の南極候補地（『データ_着陸地点』より。氷・有人ミッション向け）", 20)
+        _h2(ws, "C. NASA Artemis III の南極候補地（『データ_着陸地点』より。氷・有人の着陸候補）", 20)
         ws["A21"], ws["B21"], ws["C21"], ws["D21"], ws["E21"] = (
             "候補地", "緯度", "経度", "傾斜 [度]", "日照率 [%]")
         for c in "ABCDE":
@@ -1270,8 +1414,8 @@ def build(student: bool = False):
             for c in "BCDE":
                 ws[f"{c}{r}"].font = BLUE
 
-        _note(ws, "考察：①なぜ班ごとに『半球』までちがった？　氷採掘は南極で合意、でも太陽光や有人は割れる。なぜ？　"
-                  "②電波天文台の班の場所から、地球は見える？（見えたら失格）　"
+        _note(ws, "考察：①1番に置いた要素が違うと、基地の場所はどう違った？　同じ1番でも別の場所を選んだ班は、何を見て選んだ？　"
+                  "②1位が線のそばにあった班は、重みと線のどちらで場所が決まった？（線を5°動かして確かめる）　"
                   "③赤道に基地を置くなら、ステップ1の1日約290Kの較差にどう対処する？　"
                   "④このデータで『信じてよいか怪しいこと』は？（日照率・傾斜の絶対値／earth_elev_deg は秤動を無視／"
                   "temp_amp_K は極で不確か）", 27)

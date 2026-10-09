@@ -21,6 +21,13 @@
    データ_地点比較（5クレーター）、ステップ1b の線の式、ステップ1c の表・カーブを、同梱の生データ
    （data/diviner_global.csv.gz・data/craters_subset.csv）から pandas で独立に再現して突き合わせる。
 
+4. 要素ごとの分析と重み（docs/design_yoso_v3.md rev2）
+   ステップ4の C5 のプルダウン（先頭＝『月全体（線の内側）』。非表示列 M5:M13・名前 AreaChoices／AllMoon／LineOK）と C4（線）、
+   学習者版の既定（C8＝1）、データ_環境 O 列の『採点する行』、A6・B36 の月全体の分岐、H 列（夜の最低温度）の構造・式の検査。
+   月全体の期待値（設定A〜D・電力0の試行(b)・線50〜90・上位10・範囲・状態表示・B36 の確認の一文、4b の水1番・傾斜2番）を
+   pandas で再現し（--pandas）、Excel 実機の再計算結果と突き合わせる（--excel）。負の検査（C4 の空欄・範囲外、電力の行だけ、重みが全部0、C8＝0）も含む。
+   学習者版に『ミッション』『観測』『合格』『目安』『ティコ付近』『表側の中央』と答えの座標の文がないこと（AC1④⑤）も走査する。
+
 終了コード: すべて合格なら 0、1つでも不合格なら 1。
 元のファイルは Excel で開かない（コピーを一時フォルダに作って開く）。
 """
@@ -51,30 +58,36 @@ ROOT_DATA = HERE.parent / "data"          # 同梱の生データ（diviner_glob
 # 学習者版では 0 件、教員版では全語が 1 件以上あること。
 # ---------------------------------------------------------------------------
 ANSWER_WORDS = [
-    # 要件 §4-X-2 で挙げられた語
-    "第一候補", "電波天文に理想", "氷採掘は南極", "見えたら失格", "裏側に", "永久影のそば",
-    # はじめに（企画書 G1／指導案 §6.5）
-    "電波天文台は裏側に", "通信重視なら表側に", "半球ごと変わります", "地球の電波が届かないこと",
-    "（＝月の裏側）", "氷がありそうなこと", "ずっと日が当たらない永久影", "基地に必要なこと",
-    "どこも『全部で一番』", "各ミッションの答え",
+    # 要件 §4-X-2 で挙げられた語のうち、教員版に残るもの
+    "第一候補", "電波天文に理想", "永久影のそば",
     # ステップ1
     "極付近（要注意）",
     # ステップ2（企画書 G1 の A33、G3 の D26）
     "海岸線の外側の陸も丸に入る", "落ちた後に消えた", "隕石が落ちなかった", "C の年代の平均が小さいほう",
     # ステップ3（企画書 G1）
     "正＝表側で通信できる", "負＝裏側で電波が静か", "裏側は地球の仰角が負", "南極は日較差が小さいが太陽高度は",
-    # ステップ4（企画書 G1 の B8〜B12、指導案 §6.5 の A15〜C21・A37）
-    "（発電）", "（熱の安定）", "（通信できる）", "（電波が静か・天文台）", "（夜に冷えすぎない）",
-    "経度180度あたりが上位に来る", "ミッションごとの選び方", "2・2・0・0・1", "0・2・0・3・0",
-    "1・1・3・0・0", "1・2・1・0・1", "永久影は環境データに無い", "赤道の海（静かの海） か 南極",
-    # ステップ4b_スコア
-    "氷採掘・南極を選んだ班向け", "ミッションごとの重み", "氷採掘基地", "太陽光発電基地", "有人基地",
+    # ステップ4（教員版の重みの行の注。用途の語は学習者版に出さない）
+    "（電力）", "（温度の安定）", "（通信できる）", "（観測用。授業では使わない）", "（夜に冷えすぎない）",
     # ステップ5
-    "氷採掘は南極で合意", "実在の計画は、ミッションで半球がちがう", "Artemis III（有人・氷）",
+    "Artemis III（有人・氷）",
     # データ_地域 の rationale / caveat
     "永久影に氷があり", "電波雑音が届かない", "電波静穏度が最も高い", "LCRT（月裏側電波望遠鏡）構想の対象域",
     # 参考
     "（＝陸のほうが古い）",
+    # 要素ごとの分析と重み（設計 docs/design_yoso_v3.md）で教員版に入れた答え・組合せ例の文（学習者版には出さない）
+    "月全体の例", "水を1番にした班の例", "試行(a) 1番を替える", "電力を0にすると", "北と南で同点",
+    "選んだのは重みではなく線", "重みが違う班どうしで比べない", "傾斜（建設）は2番", "1位は行の順で決まっただけ",
+    "使うシートは1番で決まります", "1番に置いた要素が違うと",
+]
+
+# 役目を終えた旧い教員版の答え語（ミッション版の文）。教員版には無いが、学習者版に紛れ込んでいないことを確かめ続ける（学習者版0件）
+RETIRED_ANSWER_WORDS = [
+    "氷採掘は南極", "見えたら失格", "裏側に", "電波天文台は裏側に", "通信重視なら表側に", "半球ごと変わります",
+    "（＝月の裏側）", "氷がありそうなこと", "ずっと日が当たらない永久影", "基地に必要なこと", "各ミッションの答え",
+    "（発電）", "（熱の安定）", "（電波が静か・天文台）", "経度180度あたりが上位に来る", "ミッションごとの選び方",
+    "2・2・0・0・1", "0・2・0・3・0", "1・1・3・0・0", "1・2・1・0・1", "永久影は環境データに無い",
+    "赤道の海（静かの海） か 南極", "氷採掘・南極を選んだ班向け", "ミッションごとの重み", "氷採掘基地", "太陽光発電基地",
+    "有人基地", "氷採掘は南極で合意", "実在の計画は、ミッションで半球がちがう",
 ]
 
 # 第2時の再設計（設計 §7.1）で足した語。学習者版では 0 件。教員版は、教員版に入れた語（TEACHER_NEW_PRESENT）だけ存在を確認する。
@@ -84,7 +97,7 @@ NEW_ANSWER_WORDS = [
     "信頼できない", "信頼できる", "信頼しにくい", "信じにくい", "信じてよい", "岩が多い", "岩塊", "冷めにくい",
 ]
 TEACHER_NEW_PRESENT = ["平らな地面", "斜面", "データの作り方"]
-ALL_ANSWER_WORDS = ANSWER_WORDS + NEW_ANSWER_WORDS
+ALL_ANSWER_WORDS = ANSWER_WORDS + RETIRED_ANSWER_WORDS + NEW_ANSWER_WORDS
 # 新しい2つのデータ表の見出しに入れてはいけない語（判断・原因の語）
 HEADER_BAD_WORDS = ["信頼", "信じ", "判定", "外れ", "違う", "異常", "原因", "斜面", "岩", "限界", "要注意"]
 
@@ -97,6 +110,7 @@ SHEETS = ["はじめに", "ステップ1_温度", S1B, S1C, "ステップ2_海�
           "データ_地質", "データ_着陸地点", "参考"]
 YELLOW = "FFF6E9"   # 黄色い入力セルの色（アルファ部分は openpyxl 出力＝00、Excel 保存＝FF と違うので比べない）
 REG_FAR_EQ = "裏側・赤道（月の裏側の赤道帯）"
+ALL_MOON = "月全体（線の内側）"      # ステップ4 C5 のプルダウンの先頭（非表示列 M5）
 S1, S2, S4, S4B = "ステップ1_温度", "ステップ2_海と陸", "ステップ4_地域を選ぶ", "ステップ4b_スコア"
 
 RESULTS = []   # (合否, 項目, 詳細)
@@ -236,8 +250,54 @@ def check_mission_words(teacher, student):
         print(f"       学習者版 {a}  「{w}」 …{c}…")
     ht, _ = mission_hits(teacher)
     found = {w for _, w, _ in ht}
-    record(found == set(MISSION_WORDS), "教員版：全 8 語が検出される（検査が空振りでない）",
-           f"検出 {len(ht)} 件／語 {sorted(found)}" + ("" if found == set(MISSION_WORDS) else f" 未検出 {sorted(set(MISSION_WORDS) - found)}"))
+    # 「ミッション」を「要素」に置き換えた後の教員版には、データ_地域の rationale・実在の計画の表・要素の表に残る語だけがある
+    # （発電・太陽光は旧ミッション名の語で、教員版からも消えた）。検査が空振りでないこと＝残る6語が検出されること
+    want = set(MISSION_WORDS) - {"発電", "太陽光"}
+    record(found == want, "教員版：残る 6 語（電波・氷採掘・天文・採掘・通信・有人）が検出される（検査が空振りでない。発電・太陽光は旧ミッション名の語で教員版からも消えた）",
+           f"検出 {len(ht)} 件／語 {sorted(found)}" + ("" if found == want else f" 期待との差 {sorted(found ^ want)}"))
+
+
+# 要素ごとの分析と重み（設計 docs/design_yoso_v3.md rev2 AC1④⑤）：学習者版に、旧い呼び名（ミッション）・発展の語（観測）・
+# 評価の語（合格・目安）と、答えにあたる記述（月全体の1位の座標・「ティコ付近」「表側の中央」）がない
+V3_STUDENT_WORDS = ["ミッション", "観測", "合格", "目安", "ティコ付近", "表側の中央"]
+# 学習者版に載せてはいけない座標（月全体の1位・4bの1位）。(lat, lon) を文として書いたものを探す
+ANSWER_POINTS = [(-43.5, -11.5), (-1.5, 0.5), (1.5, 0.5), (-4.5, -8.5), (88.5, -103.5), (-85.6, 138.0), (-84.4, 156.0),
+                 (-82.5, 10.5), (73.5, -11.5), (-88.4, -147.0)]
+
+
+def _coord_regex(lat, lon):
+    def num(x):
+        t = f"{abs(x):.1f}"
+        return (r"[-−‐]\s*" if x < 0 else "") + re.escape(t)
+    return re.compile(num(lat) + r"\s*[,，、]\s*" + num(lon))
+
+
+def check_v3_student_words(teacher, student):
+    print(chr(10) + "== 1c. 旧い呼び名・発展の語・答えの座標（要素ごとの分析と重み。AC1④⑤・AC2） ==")
+    wb = load_workbook(student, read_only=True)
+    texts = [(ws.title, c.coordinate, c.value) for ws in wb.worksheets for row in ws.iter_rows() for c in row
+             if isinstance(c.value, str) and c.value]
+    hits = [f"{sh}!{a}「{w}」" for sh, a, t in texts for w in V3_STUDENT_WORDS if w in t]
+    # 「ティコ」だけ（クレーター名。ステップ1c のプルダウン・データ表）は許容。ここでは「ティコ付近」だけを禁止している
+    xml_hits = []
+    with zipfile.ZipFile(student) as z:
+        for n in z.namelist():
+            if n.endswith((".xml", ".rels")):
+                t = z.read(n).decode("utf-8", errors="replace")
+                xml_hits += [f"{n}「{w}」" for w in V3_STUDENT_WORDS if w in t]
+    record(not hits and not xml_hits, f"学習者版：全セルと全部品に {V3_STUDENT_WORDS} が 0 件（クレーター名の『ティコ』は許容）",
+           "; ".join((hits + xml_hits)[:6]))
+    pat = [(p_, _coord_regex(*p_)) for p_ in ANSWER_POINTS]
+    chits = [f"{sh}!{a} {p_}" for sh, a, t in texts for p_, rx in pat if rx.search(t)]
+    record(not chits, "学習者版：月全体・4bの1位の座標を文として書いた箇所が 0 件（文字列セルを走査。数値セルのデータは対象外）", "; ".join(chits[:5]))
+    # 空振りの確認：教員版の月全体の例・4bの例には座標の文字列がある
+    wt = load_workbook(teacher, read_only=True)
+    tt = [c.value for ws in wt.worksheets for row in ws.iter_rows() for c in row if isinstance(c.value, str)]
+    found = [p_ for p_, rx in pat if any(rx.search(t) for t in tt)]
+    record(len(found) >= 3, f"（空振りでない確認）教員版には座標を文にした箇所がある：{found[:4]}")
+    # 旧い呼び名の「ミッション」が教員版の表計算の文にも残っていない（実在の計画の説明を除き、0 件）
+    tm = [t for t in tt if "ミッション" in t]
+    record(not tm, "教員版：旧い呼び名『ミッション』が 0 件", "; ".join(t[:20] for t in tm[:3]))
 
 
 # 地域名（データ_地域 A列）の列挙と、ミッション語・答えの示唆がないことの確認
@@ -285,35 +345,50 @@ def check_structure(teacher, student):
     record(sorted(hid) == sorted(STUDENT_HIDDEN), "学習者版の非表示シート", "、".join(hid))
 
     # 黄色い入力セル（要件 §3.2：位置を動かさない）
-    inputs = {S4: ["C5", "C8", "C9", "C10", "C11", "C12"], S4B: ["C8", "C9", "C10", "C11"],
+    inputs = {S4: ["C4", "C5", "C8", "C9", "C10", "C11", "C12"], S4B: ["C8", "C9", "C10", "C11"],
               S1: ["A8", "B8", "A9", "B9", "A10", "B10", "A11", "B11", "B17", "B18"],
               S1B: ["B6", "B7"], S1C: ["B5"]}
     for label, wb in (("教員版", wt), ("学習者版", ws_)):
         bad = [f"{sh}!{a}" for sh, lst in inputs.items() for a in lst if fill_of(wb[sh], a) != YELLOW]
-        record(not bad, f"{label}：黄色い入力セルの位置（ステップ4 C5・C8〜C12、4b C8〜C11、ステップ1、1b B6・B7、1c B5）", "、".join(bad))
+        record(not bad, f"{label}：黄色い入力セルの位置（ステップ4 C4〔線。新設〕・C5・C8〜C12、4b C8〜C11、ステップ1、1b B6・B7、1c B5）", "、".join(bad))
     # 既定値
     t4, t4b = wt[S4], wt[S4B]
     s4, s4b = ws_[S4], ws_[S4B]
     record(t4["C5"].value == "赤道の海（静かの海）" and [t4[f"C{r}"].value for r in range(8, 13)] == [2, 2, 0, 0, 0]
            and [t4b[f"C{r}"].value for r in range(8, 12)] == [3, 0, 0, 2],
            "教員版：既定値（C5＝赤道の海、重み 2・2・0・0・0／4b 3・0・0・2）は従来どおり")
-    record(s4["C5"].value in (None, "") and all(s4[f"C{r}"].value == 0 for r in range(8, 13))
-           and all(s4b[f"C{r}"].value == 0 for r in range(8, 12)),
-           "学習者版：C5 空欄、重みはすべて 0（ステップ4・4b）")
+    record(t4["C4"].value == 70, "教員版：ステップ4 C4（線）の既定は 70")
+    # 更新：学習者版の既定の重みは、C8（電力＝太陽高度の行／4bは日照率の行）＝1 で配る（設計 V3-S5。以前は重みがすべて 0 だった）
+    record(s4["C5"].value in (None, "") and s4["C4"].value in (None, "") and [s4[f"C{r}"].value for r in range(8, 13)] == [1, 0, 0, 0, 0]
+           and [s4b[f"C{r}"].value for r in range(8, 12)] == [1, 0, 0, 0],
+           "学習者版：C5・C4（線）は空欄、重みは C8（電力）＝1・ほかは 0（ステップ4・4b。更新：以前はすべて 0）")
 
     # 入力規則
     for label, wb in (("教員版", wt), ("学習者版", ws_)):
         dvs = wb[S4].data_validations.dataValidation
         lst = [d for d in dvs if d.type == "list" and "C5" in str(d.sqref)]
+        line_dv = [d for d in dvs if d.type == "whole" and "C4" in str(d.sqref) and d.formula1 == "50" and d.formula2 == "90"]
         whole = [d for d in dvs if d.type == "whole" and "C8:C12" in str(d.sqref)
                  and d.formula1 == "0" and d.formula2 == "5"]
         dvs_b = wb[S4B].data_validations.dataValidation
         whole_b = [d for d in dvs_b if d.type == "whole" and "C8:C11" in str(d.sqref)
                    and d.formula1 == "0" and d.formula2 == "5"]
         ref = wb.defined_names.get("RegionNames")
-        record(len(lst) == 1 and lst[0].formula1 == "RegionNames" and ref is not None
-               and ref.attr_text == "データ_地域!$A$2:$A$9",
-               f"{label}：C5 のプルダウン（名前 RegionNames＝データ_地域!A2:A9）")
+        ac, am, lo = (wb.defined_names.get(k) for k in ("AreaChoices", "AllMoon", "LineOK"))
+        record(len(lst) == 1 and lst[0].formula1 == "AreaChoices" and ref is not None
+               and ref.attr_text == "データ_地域!$A$2:$A$9"
+               and ac is not None and ac.attr_text == f"{S4}!$M$5:$M$13"
+               and am is not None and am.attr_text == f"{S4}!$M$5" and lo is not None and lo.attr_text == f"{S4}!$M$14",
+               f"{label}：C5 のプルダウン（名前 AreaChoices＝{S4}!M5:M13、AllMoon＝M5、LineOK＝M14。RegionNames＝データ_地域!A2:A9 は残る）")
+        s4w = wb[S4]
+        record(s4w.column_dimensions["M"].hidden and s4w["M5"].value == ALL_MOON
+               and [s4w[f"M{6 + i}"].value for i in range(8)] == [f"=データ_地域!A{2 + i}" for i in range(8)]
+               and str(s4w["M14"].value).startswith("=IFERROR(IF(AND(ISNUMBER($C$4)"),
+               f"{label}：非表示列 M：M5＝『{ALL_MOON}』（プルダウンの先頭）、M6:M13＝データ_地域 A2:A9 へのリンク、M14＝LineOK の式")
+        record(len(line_dv) == 1 and str(s4w["A4"].value).startswith("線 [°]") and "A4:B4" in [str(r) for r in s4w.merged_cells.ranges]
+               and "温度のデータを使う範囲" in str(s4w["A4"].value) and "採点する" not in str(s4w["A4"].value)
+               and "温度のデータを使う範囲" in str(line_dv[0].prompt) and "採点" not in str(line_dv[0].prompt),
+               f"{label}：ステップ4 C4（線）の入力規則（整数 50〜90。吹き出しは『温度のデータを使う範囲』）と A4 のラベル")
         record(len(whole) == 1 and len(whole_b) == 1,
                f"{label}：重みの入力規則（ステップ4 C8:C12、4b C8:C11＝0〜5 の整数）")
     # 状態表示・範囲表示セルの存在
@@ -323,12 +398,16 @@ def check_structure(teacher, student):
         b36 = str(wb[S4]["B36"].value)
         b36b = str(wb[S4B]["B36"].value)
         record(a6.startswith("=") and "南極" in a6 and a13.startswith("=") and b36.startswith("=")
-               and "日付変更線" in b36 and b36b.startswith("=") and "日照率" in b36b,
+               and "日付変更線" in b36 and b36b.startswith("=") and "日照率" in b36b
+               and "AllMoon" in a6 and "LineOK" in a6 and "AllMoon" in b36 and "LineOK" in b36,
                f"{label}：状態表示（ステップ4 A6・4b A13）と範囲表示（B36）の式がある")
     # 順位用列（同点解消）
     for label, wb in (("教員版", wt), ("学習者版", ws_)):
         e = wb["データ_環境"]
         p = wb["データ_南極"]
+        o2 = str(e["O2"].value)
+        record("AllMoon" in o2 and "LineOK" in o2 and "ABS($A2)<=LineOK" in o2 and "ISNUMBER(LineOK)" in o2,
+               f"{label}：データ_環境 O 列の『採点する行』の条件（月全体＝|緯度|≦線、地域名＝region 一致）")
         record(str(e["P2"].value).startswith("=IF(O2") and "ROW()" in str(e["P2"].value)
                and "ROW()" in str(p["M2"].value) and e["O1"].value == "スコア" and p["L1"].value == "スコア",
                f"{label}：順位用列（データ_環境 P、データ_南極 M）に行番号のタイブレークがある")
@@ -349,6 +428,11 @@ def check_structure(teacher, student):
     need = ["ステップ1_温度", S1B, S1C, "ステップ2_海と陸", "ステップ4_地域を選ぶ", "ステップ4b_スコア", "上書き保存しない", "編集を有効にする"]
     record(all(n in intro for n in need) and "ステップ3" not in intro and "ステップ5" not in intro,
            "学習者版：『はじめに』は使うシート（1・1b・1c・2・4・4b_スコア）と操作の決まりだけを案内し、使わないシートを挙げない")
+    record("月全体（線の内側）" in intro and "C5" in intro and "C4" in intro and intro.index("C5") < intro.index("C4"),
+           "学習者版：『はじめに』にステップ4の入力の順（C5 → C4 → 重み）と、『月全体（線の内側）』の案内が 1 行ある")
+    t4a = " ".join(str(c.value) for row in ws_[S4].iter_rows(max_row=5) for c in row if c.value)
+    record("ミッション" not in t4a and "ステップ4：採点する範囲を選んで" in t4a and "ミッション" not in str(ws_[S4B]["A1"].value),
+           "学習者版：ステップ4・4b の題から『ミッション』を除いた")
     # 条件付き書式・チャート（Excel 保存版でも保たれていること）
     for label, wb in (("教員版", wt), ("学習者版", ws_)):
         cf4 = [str(r.sqref) for r in wb[S4].conditional_formatting]
@@ -363,6 +447,12 @@ def check_structure(teacher, student):
     h = " ".join(str(c.value) for row in ws_[S1]["A6:A6"] for c in row)
     record("変えずに" in h, "学習者版：ステップ1の見出し A6 は黄色い緯度帯を変えない案内（教員版は従来どおり）")
     check_structure_dai2ji(wt, ws_)
+    # H 列（上位10の表の夜の最低温度）
+    for label, wb in (("教員版", wt), ("学習者版", ws_)):
+        w4 = wb[S4]
+        record(w4["H25"].value == "夜の最低温度 [K]" and all(str(w4[f"H{r}"].value).startswith("=IFERROR(INDEX(データ_環境!$F$2:$F$14401,MATCH(")
+                                                           for r in range(26, 36)),
+               f"{label}：ステップ4 の上位10の表に H 列『夜の最低温度 [K]』（H26:H35＝データ_環境 F 列を引く）")
     # 文書情報に個人名がない
     with zipfile.ZipFile(student) as z:
         core = z.read("docProps/core.xml").decode("utf-8")
@@ -442,12 +532,25 @@ def check_structure_dai2ji(wt, ws_):
 NORM4 = ["norm_sun_high", "norm_amp_low", "norm_earth_high", "norm_earth_low", "norm_night_warm"]
 NORM4B = ["norm_illum", "norm_near_shadow", "norm_low_psf", "norm_low_slope"]
 EPS = 1e-12
-STD4 = {  # 指導案 §8 の標準の重み（ステップ4）
-    "電波天文（裏側・赤道）": (REG_FAR_EQ, (0, 2, 0, 3, 0)),
-    "太陽光（赤道の海）": ("赤道の海（静かの海）", (2, 2, 0, 0, 1)),
-    "有人総合（赤道の海）": ("赤道の海（静かの海）", (1, 2, 1, 0, 1)),
+# 式の検査例（旧『標準の重み』。ミッション別の呼び名は廃止。重みの組は従来どおり。1位は変更前の方式と同じであることを確かめる）
+STD4 = {
+    "式の例1（裏側・赤道 0,2,0,3,0）": (REG_FAR_EQ, (0, 2, 0, 3, 0)),
+    "式の例2（赤道の海 2,2,0,0,1）": ("赤道の海（静かの海）", (2, 2, 0, 0, 1)),
+    "式の例3（赤道の海 1,2,1,0,1）": ("赤道の海（静かの海）", (1, 2, 1, 0, 1)),
 }
-STD4B = {"氷採掘（4b）": (0, 3, 0, 2), "太陽光（4b）": (3, 0, 0, 2), "有人（4b）": (2, 2, 1, 2)}
+K_STD4_FAR = "式の例1（裏側・赤道 0,2,0,3,0）"
+STD4B = {"式の例1（4b 0,3,0,2）": (0, 3, 0, 2), "式の例2（4b 3,0,0,2）": (3, 0, 0, 2), "式の例3（4b 2,2,1,2）": (2, 2, 1, 2),
+         # 要素ごとの分析と重み：水を1番にした班（4b）。電力＝日照率の行は1点。1位は設計 §3.1・付録Bの値
+         "水1番（4b 1,3,0,0）": (1, 3, 0, 0), "水1番＋傾斜2番（4b 1,3,0,2）": (1, 3, 0, 2), "水1番・電力0（4b 0,3,0,0）": (0, 3, 0, 0)}
+K_STD4B_ICE = "式の例1（4b 0,3,0,2）"
+# 月全体（線の内側）：設定A〜D（重み＝太陽高度・日較差・仰角表・仰角裏・夜）。電力＝太陽高度の行は1点（設計 §3）
+SET_ALL = {"A": (1, 2, 0, 0, 1), "B": (1, 0, 3, 0, 0), "C": (1, 2, 2, 0, 1), "D": (1, 1, 3, 0, 1)}
+SET_ALL0 = {k + "0": (0,) + w[1:] for k, w in SET_ALL.items()}      # 試行(b)：電力を0にする
+SWAP = {"A": "B", "B": "A", "C": "D", "D": "C"}                      # 試行(a)：1番を替える
+LINES_ALL = (50, 70, 80, 85, 86, 88, 89, 90)
+# 設計 §3.1・付録C の1位（線50〜88。Aだけ線89・90で北極側）。独立に pandas で再計算した値との突き合わせに使う
+TOP_ALL_EXPECT = {"A": (-43.5, -11.5), "B": (-1.5, 0.5), "C": (-4.5, -8.5), "D": (-1.5, 0.5)}
+TOP_ALL_A_POLAR = (88.5, -103.5)
 
 
 class Expect:
@@ -546,6 +649,26 @@ class Expect:
         e = self.env.set_index("row")
         return r, [(float(e.loc[x, "lat"]), float(e.loc[x, "lon"])) for x in r], sc
 
+    # --- ステップ4 月全体（線の内側）---
+    def score_all(self, line, w):
+        """データ_環境 O 列の式（月全体）：|緯度|≦線 のマスだけを、全球固定の正規化 J〜N の重みつき平均で採点（マス中心）"""
+        e = self.env
+        sc = np.full(len(e), np.nan)
+        if sum(w) > 0:
+            m = (e["lat"].abs() <= line).values
+            s = np.zeros(int(m.sum()))
+            for wi, col in zip(w, NORM4):          # Excel の式と同じ順に足す
+                s = s + wi * e.loc[m, col].values
+            sc[m] = s / max(1, sum(w))
+        return sc
+
+    def top_all(self, line, w, k=10):
+        sc = self.score_all(line, w)
+        rows = self.env["row"].values
+        r = self.top10_new(sc, rows, k)
+        e = self.env.set_index("row")
+        return r, [(float(e.loc[x, "lat"]), float(e.loc[x, "lon"])) for x in r], sc
+
     # --- ステップ4b ---
     def score4b(self, w):
         p = self.ps
@@ -580,6 +703,23 @@ def range_text4(pts):
     if max(lon) - min(lon) > 180:
         return s + "経度は日付変更線をまたぐので範囲を出しません"
     return s + f"経度 {fmt1(min(lon))} 〜 {fmt1(max(lon))} °"
+
+
+def range_text_all(pts, line):
+    """月全体（ステップ4 B36）：緯度・経度の範囲＋散らばりの注意＋1位が線のいちばん外側のときの確認の一文"""
+    lat = [p[0] for p in pts]
+    lon = [p[1] for p in pts]
+    t = f"緯度 {fmt1(min(lat))} 〜 {fmt1(max(lat))} °　／　経度 {fmt1(min(lon))} 〜 {fmt1(max(lon))} °"
+    if max(lon) - min(lon) > 180:
+        t += "　（経度が広く散らばっています。10行を1つずつ見ます）"
+    if abs(lat[0]) >= line - 3:
+        t += "　【確認】1位が線のいちばん外側のマスにあります。線を少し内側にして確かめます"
+    return t
+
+
+def n_cells_line(ex, line):
+    """月全体の採点対象のマス数（|緯度|≦線）"""
+    return int((ex.env["lat"].abs() <= line).sum())
 
 
 def range_text4b(ex, rows):
@@ -700,11 +840,129 @@ def check_dai2ji_pandas(ex):
            f"（教員用の確認）内部が帯の9割の範囲の外：{out}（ティコ・コペルニクス・ラングレヌス＝外、プトレマイオス・アルフォンスス＝内）")
 
 
+def n_places(pts, thr):
+    """上位10の『場所の数』：緯度・経度がともに thr° 以内の点どうしをつなげた連結成分の数（経度は周期360°）"""
+    n = len(pts)
+    par = list(range(n))
+
+    def find(i):
+        while par[i] != i:
+            par[i] = par[par[i]]
+            i = par[i]
+        return i
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            dlat = abs(pts[i][0] - pts[j][0])
+            dlon = abs(pts[i][1] - pts[j][1])
+            dlon = min(dlon, 360 - dlon)
+            if dlat <= thr and dlon <= thr:
+                par[find(i)] = find(j)
+    return len({find(i) for i in range(n)})
+
+
+def check_v3_pandas(ex):
+    """要素ごとの分析と重み（docs/design_yoso_v3.md rev2）：月全体（線の内側）・4b の期待値を、別の書き方（pandas）で再現して確かめる"""
+    print("   [月全体（線の内側）：設計 §3・付録B・付録C]")
+    # マス中心の採点対象数（付録B）
+    exp_n = {50: 8160, 60: 9600, 70: 11040, 75: 12000, 80: 12960, 85: 13440, 86: 13920, 87: 13920, 88: 13920, 89: 14400, 90: 14400}
+    got_n = {k: n_cells_line(ex, k) for k in exp_n}
+    record(got_n == exp_n, f"月全体の採点対象マス数（|緯度|≦線。マス中心）{got_n}")
+    # 設定A〜Dの1位（線50〜90をすべて）
+    bad = []
+    top = {}
+    for nm, w in SET_ALL.items():
+        for ln in range(50, 91):
+            r, pts, sc = ex.top_all(ln, list(w))
+            top[(nm, ln)] = pts
+            want = TOP_ALL_A_POLAR if (nm == "A" and ln >= 89) else TOP_ALL_EXPECT[nm]
+            if pts[0] != want:
+                bad.append((nm, ln, pts[0], want))
+    record(not bad, "設定A〜Dの1位（線50〜90）：A＝（−43.5, −11.5）〔線89・90は北極側（88.5, −103.5）〕、B・D＝（−1.5, 0.5）、C＝（−4.5, −8.5）", str(bad[:3]))
+    sameA = all(top[("A", ln)] == top[("A", 70)] for ln in range(50, 89))
+    sameBCD = all(top[(nm, ln)] == top[(nm, 70)] for nm in "BCD" for ln in range(50, 91))
+    record(sameA and sameBCD and top[("A", 89)] != top[("A", 70)],
+           "上位10（順位つき）：Aは線50〜88で同一（89・90のみ別）、B・C・Dは線50〜90で同一（設計 §0-3・付録B）")
+    # 北と南の同点（B・D）
+    r, pts, sc = ex.top_all(70, list(SET_ALL["B"]))
+    s1, s2 = round(float(sc[r[0] - 2]), 10), round(float(sc[r[1] - 2]), 10)
+    record(pts[0] == (-1.5, 0.5) and pts[1] == (1.5, 0.5) and s1 == s2,
+           "B 通信1番：（−1.5, 0.5）と（1.5, 0.5）が同点で、表示は南が先（行番号の小さい順）", f"スコア {s1}")
+    # 上位10の場所の数（5°以内は同じ場所）とスコアの範囲
+    places = {nm: n_places(top[(nm, 70)], 5) for nm in SET_ALL}
+    rng = {}
+    for nm, w in SET_ALL.items():
+        r, pts, sc = ex.top_all(70, list(w))
+        v = [round(float(sc[x - 2]), 3) for x in r]
+        rng[nm] = (min(v), max(v))
+    record(places == {"A": 8, "B": 1, "C": 2, "D": 1}, f"上位10の場所の数（5°以内＝同じ場所）{places}（設計：A 8・B 1・C 2・D 1）")
+    p3 = {th: n_places(top[("A", 70)], th) for th in (3, 4, 6, 10, 15, 20)}
+    record(p3 == {3: 8, 4: 8, 6: 8, 10: 7, 15: 6, 20: 6}, f"Aの上位10の場所の数の閾値依存 {p3}（設計：3〜6°で8、10°で7、15°・20°で6）")
+    exp_rng = {"A": (0.478, 0.520), "B": (0.991, 1.0), "C": (0.632, 0.645), "D": (0.791, 0.798)}
+    record(rng == exp_rng, f"上位10のスコアの範囲 {rng}（設計 §3.1：A 0.478〜0.520・B 0.991〜1.000・C 0.632〜0.645・D 0.791〜0.798）")
+    # 試行 (a)(b)(c)
+    ok_a = all(ex.top_all(ln, list(SET_ALL[SWAP[nm]]))[1][0] == top[(SWAP[nm], ln)][0] for nm in SET_ALL for ln in (70, 85))
+    record(ok_a and top[("A", 70)][0] != top[("B", 70)][0] and top[("C", 70)][0] != top[("D", 70)][0],
+           "試行(a) 1番を替える：A⇄B・C⇄D はすべて1位が動く（A→B＝緯度42°・経度12°、C→D＝緯度3°・経度9°）")
+    b0 = {}
+    for nm, w in SET_ALL0.items():
+        for ln in range(50, 91):
+            b0[(nm, ln)] = ex.top_all(ln, list(w))[1][0]
+    tico, pol, w73, s82 = (-43.5, -11.5), (88.5, -103.5), (73.5, -11.5), (-82.5, 10.5)
+    exp_a0 = all(b0[("A0", ln)] == (tico if ln <= 73 else w73 if ln <= 82 else s82 if ln <= 88 else pol) for ln in range(50, 91))
+    exp_c0 = all(b0[("C0", ln)] == (tico if ln <= 88 else pol) for ln in range(50, 91))
+    exp_bd0 = all(b0[("B0", ln)] == (-1.5, 0.5) and b0[("D0", ln)] == (-1.5, 0.5) for ln in range(50, 91))
+    record(exp_a0 and exp_c0 and exp_bd0,
+           "試行(b) 電力を0にする：A0＝線50〜73ティコ付近／74〜82（73.5, −11.5）／83〜88（−82.5, 10.5）／89・90北極側、"
+           "C0＝線50〜88ティコ付近、B0・D0は動かない（設計 付録C）")
+    c90 = {nm: ex.top_all(90, list(w))[1][0] for nm, w in SET_ALL.items()}
+    record(c90["A"] == pol and all(c90[nm] == top[(nm, 70)][0] for nm in "BCD"),
+           "試行(c) 線を90にする：Aだけ（88.5, −103.5）に動く（B・C・Dは動かない）")
+    # 重みが規則から外れたとき（日較差だけを重く、夜0）は線で1位が9通りに動く
+    exp_x = [((50, 61), (-43.5, -11.5)), ((62, 64), (61.5, 49.5)), ((65, 67), (-64.5, -100.5)), ((68, 70), (67.5, -157.5)),
+             ((71, 76), (-70.5, -95.5)), ((77, 79), (-76.5, 57.5)), ((80, 82), (79.5, 93.5)), ((83, 88), (-82.5, 10.5)),
+             ((89, 90), (88.5, -128.5))]
+    ok_x = all(ex.top_all(ln, [1, 3, 0, 0, 0])[1][0] == pt for (lo, hi), pt in exp_x for ln in range(lo, hi + 1))
+    record(ok_x, "重み(1,3,0,0,0)（日較差だけ重く、夜0）：線50〜90で1位が9通りの位置に動き、最外周に張り付く（設計 付録B）")
+    # 電力の行だけ
+    r, pts, sc = ex.top_all(70, [1, 0, 0, 0, 0])
+    v = np.round(sc[~np.isnan(sc)], 10)
+    record(int((v == v.max()).sum()) == 480 and pts[0] == (-1.5, -179.5),
+           "電力の行だけ（線70）：480マスが同点で、1位は行順の（−1.5, −179.5）（設計 §2.6）")
+    # 月全体の1位は、8つの箱のどれにも入らない（設計 §6）
+    reg = pd.read_csv(DATA / "candidate_regions.csv")
+    pts_all = [(-43.5, -11.5), (-1.5, 0.5), (1.5, 0.5), (-4.5, -8.5), (88.5, -103.5), (-85.6, 138.0)]
+    inside = [(p_, rr["name"]) for p_ in pts_all for _, rr in reg.iterrows()
+              if rr["lat_min"] <= p_[0] <= rr["lat_max"] and rr["lon_min"] <= p_[1] <= rr["lon_max"]]
+    record(not inside, "月全体の1位（と4bの1位）は、8つの地域の箱のどれにも入らない", str(inside[:2]))
+    # 4b
+    print("   [4b：水を1番にした班（設計 §3.1）]")
+    r, pts, sc = ex.top4b([1, 3, 0, 0])
+    p_ = ex.ps.set_index("row").loc[r[0]]
+    record(pts[0] == (-85.6, 138.0) and round(p_["average_illumination_percent"], 2) == 36.95 and round(p_["km_to_shadow"], 2) == 2.96
+           and round(p_["slope_deg"], 2) == 9.02
+           and range_text4b(ex, r).startswith("日照率 30.2 〜 44.4 %　／　傾斜 5.7 〜 19.2 °　／　永久影まで 2.2 〜 6.6 km"),
+           "4b 水1番(1,3,0,0)：1位（−85.6, 138.0）、日照率36.95％・影まで2.96 km・傾斜9.02°、上位10の範囲 30.2〜44.4％／5.7〜19.2°／2.2〜6.6 km")
+    r, pts, sc = ex.top4b([1, 3, 0, 2])
+    p_ = ex.ps.set_index("row").loc[r[0]]
+    record(pts[0] == (-84.4, 156.0) and round(p_["average_illumination_percent"], 2) == 37.95 and round(p_["km_to_shadow"], 2) == 4.82
+           and round(p_["slope_deg"], 2) == 4.75
+           and range_text4b(ex, r).startswith("日照率 30.1 〜 43.3 %　／　傾斜 3.6 〜 6.2 °　／　永久影まで 4.8 〜 7.9 km"),
+           "4b 水1番＋傾斜2番(1,3,0,2)：1位（−84.4, 156.0）、37.95％・4.82 km・4.75°、範囲 30.1〜43.3％／3.6〜6.2°／4.8〜7.9 km（試行(d)）")
+    record(ex.top4b([1, 3, 0, 1])[1][0] == (-84.4, 156.0) and ex.top4b([1, 3, 0, 3])[1][0] == (-84.4, 156.0),
+           "4b 傾斜を1点でも3点でも1位は（−84.4, 156.0）で同じ（設計 §3.3）")
+    r, pts, sc = ex.top4b([0, 3, 0, 0])
+    v = np.round(sc, 10)
+    record(pts[0] == (-88.4, -147.0) and int((v == v.max()).sum()) == 127 and ex.top4b([0, 3, 0, 2])[1][0] == (-88.2, 114.0),
+           "4b 電力0(0,3,0,0)：127地点が同点で1位は行順の（−88.4, −147.0）。(0,3,0,2) は（−88.2, 114.0）（試行にしない。設計 §2.6）")
+
+
 def check_pandas(ex):
     print("\n== 3a. pandas による式の再現 ==")
     b = ex.bands()
     record(b == [295, 279, 234, 156], f"ステップ1の4バンドの日較差の平均 {b}（期待 295・279・234・156 K。データ_緯度行 の行から）")
     check_dai2ji_pandas(ex)
+    check_v3_pandas(ex)
     ns, nl, ds, dl, r1, r = ex.density()
     record((ns, nl) == (2232, 34145) and abs(r - 3.52) < 0.005,
            f"ステップ2：クレーター数 海{ns}・陸{nl}、密度 海{ds}・陸{dl}、倍率 {r:.3f}（表示は小数1桁で {r1}）")
@@ -761,8 +1019,8 @@ def check_pandas(ex):
         r, pts, sc = ex.top4b(w, "old")
         record(len(set(r)) < 10, f"{lab}：変更前の方式では上位10が {len(set(r))} 行しかない（不具合の再現）")
 
-    # --- 標準の重み ---
-    print("   [標準の重み（指導案 §8）]")
+    # --- 式の検査例（旧・標準の重み）---
+    print("   [式の検査例（重みの組は従来どおり。1位は変更前の方式と同じ）]")
     for lab, (reg, w) in STD4.items():
         ro, po, _ = ex.top4(reg, list(w), "old")
         rn, pn, _ = ex.top4(reg, list(w), "new")
@@ -772,17 +1030,17 @@ def check_pandas(ex):
         rn, pn, _ = ex.top4b(list(w), "new")
         record(ro[0] == rn[0], f"{lab}：1位は変更前と同じ地点 {pn[0]}", f"変更前の1位 {po[0]}")
     # --- A4 の期待範囲 ---
-    reg, w = STD4["電波天文（裏側・赤道）"]
+    reg, w = STD4[K_STD4_FAR]
     rn, pn, _ = ex.top4(reg, list(w))
     lat = [p[0] for p in pn]
     lon = [p[1] for p in pn]
     record(max(abs(x) for x in lat) <= 4.5 and min(lon) >= 175.5 and max(lon) <= 178.5,
-           f"A4 電波天文：上位10は緯度±4.5°以内・経度175.5〜178.5°（実測 緯度{min(lat)}〜{max(lat)}、経度{min(lon)}〜{max(lon)}）",
+           f"A4 裏側・赤道（0,2,0,3,0）：上位10は緯度±4.5°以内・経度175.5〜178.5°（実測 緯度{min(lat)}〜{max(lat)}、経度{min(lon)}〜{max(lon)}）",
            range_text4(pn))
-    rn, pn, _ = ex.top4b(list(STD4B["氷採掘（4b）"]))
+    rn, pn, _ = ex.top4b(list(STD4B[K_STD4B_ICE]))
     e = ex.ps.set_index("row").loc[rn]
     record((e["average_illumination_percent"] == 0).all() and (e["km_to_shadow"] == 0).all(),
-           "A4 氷採掘（4b）：上位10は日照 0%・永久影までの距離 0 km", range_text4b(ex, rn))
+           "A4 4b（0,3,0,2）：上位10は日照 0%・永久影までの距離 0 km", range_text4b(ex, rn))
 
 
 # ---------------------------------------------------------------------------
@@ -921,6 +1179,102 @@ def check_excel_dai2ji(ex, out, label, student, lines):
     record((out.get("png_1b") == 2 and out.get("png_1c") == 1) and not out.get("errors"),
            f"{label}：Excel が描いたチャートを PNG に書き出せた（1b 2個・1c 1個。目視確認用）")
 
+def check_excel_v3(ex, out, label, student):
+    """要素ごとの分析と重み（設計 §2.5・§2.9、AC9・AC10・AC11）：ステップ4『月全体（線の内側）』の Excel 実機検査"""
+    # --- プルダウンの一覧（非表示列 M）---
+    mcol = [r[0] for r in out["m_col"]]
+    names = {n: ref for n, ref in out["info"]["names"]}
+    record(out["m_hidden"] is True and mcol[0] == ALL_MOON and mcol[1:9] == ex.regions and mcol[9] == ""
+           and names.get("AreaChoices", "").endswith("$M$5:$M$13") and names.get("AllMoon", "").endswith("$M$5")
+           and names.get("LineOK", "").endswith("$M$14"),
+           f"{label}：Excel：非表示列 M の一覧は先頭が『{ALL_MOON}』＋8地域、名前 AreaChoices・AllMoon・LineOK が M5:M13・M5・M14 を指す",
+           f"M14（線が未入力のとき）＝『{mcol[9]}』")
+    d4 = out["dv_c4"]
+    okv = [out[f"v4_ok{n}"] for n in (50, 85, 90)]
+    ngv = [out[f"v4_ng{n}"] for n in ("49", "91", "85.5", "x")]
+    record(d4.get("type") == 1 and d4.get("formula1") == "50" and d4.get("formula2") == "90" and d4.get("operator") == 1
+           and d4.get("alert_style") == 1 and all(v is True for v in okv) and all(v is False for v in ngv),
+           f"{label}：Excel：C4（線）の入力規則＝整数 50〜90（停止メッセージ）。50・85・90 は受理、49・91・85.5・x は拒否")
+    # --- 月全体：設定A〜D・A0〜D0（電力0）× 線50・70・80・85・86・88・89・90 ---
+    bad_top, bad_rng, bad_st, bad_h, n_ok, fired = [], [], [], [], 0, {}
+    for nm, w in list(SET_ALL.items()) + list(SET_ALL0.items()):
+        for ln in LINES_ALL:
+            key = f"all_{nm}_{ln}"
+            r, pts, sc = ex.top_all(ln, list(w))
+            got = top_from(out[key + "_top"])
+            if got != pts:
+                bad_top.append((key, got[:2], pts[:2]))
+            rng = range_text_all(pts, ln)
+            if out[key + "_rng"][0][0] != rng:
+                bad_rng.append((key, out[key + "_rng"][0][0], rng))
+            fired[(nm, ln)] = "【確認】" in out[key + "_rng"][0][0]
+            st = (f"OK　月全体（線 {ln}° の内側）　採点対象 {n_cells_line(ex, ln)} 行　（重みの合計 {sum(w)}）"
+                  + ("　※太陽高度の行が0です" if w[0] == 0 else ""))
+            if out[key + "_st"][0][0] != st:
+                bad_st.append((key, out[key + "_st"][0][0], st))
+            hh = [_f(x[0]) for x in out[key + "_h"]]
+            e = ex.env.set_index("row")
+            exp_h = [float(e.loc[x, "night_min_K"]) for x in r]
+            if not (len(hh) == 10 and all(a is not None and abs(a - b) < 1e-9 for a, b in zip(hh, exp_h))):
+                bad_h.append(key)
+            n_ok += 1
+    record(not bad_top, f"{label}：Excel：月全体の上位10の緯度・経度が pandas の再現と一致（設定A〜D・A0〜D0 × 線 {list(LINES_ALL)} の {n_ok} 通り）",
+           "" if not bad_top else str(bad_top[:3]))
+    record(not bad_st, f"{label}：Excel：月全体の状態表示『OK　月全体（線 □° の内側）　採点対象 N 行　（重みの合計 □）』が全 {n_ok} 通りで一致"
+           "（線70＝11040行・85＝13440行・90＝14400行。電力0では『※太陽高度の行が0です』の付記）", "" if not bad_st else str(bad_st[:2]))
+    record(not bad_rng, f"{label}：Excel：月全体の範囲表示 B36（緯度・経度の範囲、散らばりの注意、1位が線の最外周のときの【確認】）が全 {n_ok} 通りで一致",
+           "" if not bad_rng else str(bad_rng[:2]))
+    record(not bad_h, f"{label}：Excel：上位10の H 列『夜の最低温度 [K]』が データ_環境 F 列の値と一致（全 {n_ok} 通り）")
+    # --- B36 の確認の一文が出る／出ない ---
+    main_quiet = all(not fired[(nm, ln)] for nm in SET_ALL for ln in LINES_ALL if not (nm == "A" and ln >= 89))
+    a_polar = fired[("A", 89)] and fired[("A", 90)]
+    x_fired = all("【確認】" in out[f"all_X_{ln}_rng"][0][0] for ln in (80, 85))
+    x_first = [top_from(out[f"all_X_{ln}_top"])[0] for ln in (80, 85)]
+    record(main_quiet and a_polar and x_fired and x_first == [(79.5, 93.5), (-82.5, 10.5)],
+           f"{label}：Excel：B36 の確認の一文は、本線（A〜D・線50〜88）では出ず、Aの線89・90と重み(1,3,0,0,0)の線80・85（1位が最外周 79.5°・82.5°）で出る")
+    # --- 設計の1位（pandas の再現とは別に、設計の数字そのもの）---
+    for nm, w in SET_ALL.items():
+        got70 = top_from(out[f"all_{nm}_70_top"])[0]
+        got85 = top_from(out[f"all_{nm}_85_top"])[0]
+        if not (got70 == TOP_ALL_EXPECT[nm] and got85 == TOP_ALL_EXPECT[nm]):
+            record(False, f"{label}：Excel：設定 {nm} の1位（線70・85）が設計の値と違う", f"{got70}/{got85}")
+            break
+    else:
+        record(top_from(out["all_A_89_top"])[0] == TOP_ALL_A_POLAR and top_from(out["all_A_90_top"])[0] == TOP_ALL_A_POLAR,
+               f"{label}：Excel：1位 A＝（−43.5, −11.5）、B・D＝（−1.5, 0.5）、C＝（−4.5, −8.5）〔線70・85〕、A は線89・90で北極側（88.5, −103.5）")
+    # --- 試行 (a)(b)(c)（Excel の1位）---
+    t = lambda nm, ln: top_from(out[f"all_{nm}_{ln}_top"])[0]
+    ok_a = all(t(SWAP[nm], ln) != t(nm, ln) for nm in SET_ALL for ln in (70, 85))
+    ok_b = (t("A0", 70) == t("A", 70) and t("A0", 80) == (73.5, -11.5) and t("A0", 85) == (-82.5, 10.5)
+            and t("C0", 70) == (-43.5, -11.5) and t("B0", 70) == t("B", 70) and t("D0", 70) == t("D", 70))
+    ok_c = t("A", 90) == TOP_ALL_A_POLAR and all(t(nm, 90) == t(nm, 70) for nm in "BCD")
+    record(ok_a and ok_b and ok_c,
+           f"{label}：Excel：試行(a) 1番を替える＝全設定で動く／(b) 電力を0にする＝A0は線70で動かず・80で（73.5, −11.5）・85で（−82.5, 10.5）、C0は（−43.5, −11.5）、B0・D0は動かない／"
+           "(c) 線を90にする＝Aだけ北極側へ")
+    # --- 負の検査（AC11）---
+    n = lambda k: out["neg_" + k + "_st"][0][0]
+    top_blank = lambda k: all(r[0] == "" for r in out["neg_" + k + "_top"])
+    for k in ("c4_blank", "c4_95", "c4_49", "c4_dec", "c4_text"):
+        record(n(k).startswith("【注意】月全体で採点するには、C4 に線（50〜90 の整数。第2時で引いた線）を入れてください")
+               and top_blank(k) and out["neg_" + k + "_rng"][0][0] == "",
+               f"{label}：Excel：C4 が空欄・範囲外・小数・文字のとき（{k}）→ 状態表示が止め、上位10と範囲表示は空白 『{n(k)[:30]}…』")
+    record(n("only_power").startswith("【注意】太陽高度の行だけでは、同じ点数の場所が大量に出ます"),
+           f"{label}：Excel：電力（C8）の行だけに重み → 『{n('only_power')}』（月全体のみの注意。1位は行順の（−1.5, −179.5））")
+    ot = top_from(out["neg_only_power_top"])
+    record(ot and ot[0] == (-1.5, -179.5), f"{label}：Excel：電力の行だけのときの1位は行順の（−1.5, −179.5）（意味のない1位。注意で止める）")
+    record(n("zero").startswith("【注意】重みがすべて0です") and top_blank("zero"),
+           f"{label}：Excel：重みがすべて0 → 『{n('zero')}』、上位10は空白")
+    record(n("c8_0").startswith("OK　月全体（線 70° の内側）") and "【注意】" not in n("c8_0") and n("c8_0").endswith("※太陽高度の行が0です"),
+           f"{label}：Excel：電力（C8）＝0 → 注意色の【注意】でなく OK の付記『{n('c8_0')[-12:]}』")
+    record(n("over").startswith("【注意】重みは0〜5の整数で入れてください"), f"{label}：Excel：重みが範囲外（貼り付けで 9）→ 『{n('over')}』")
+    # --- 地域モードに戻したとき不変 ---
+    rg = top_from(out["back_region_top"])
+    r, pts, sc = ex.top4("赤道の海（静かの海）", [1, 2, 0, 0, 1])
+    record(rg == pts and rg[0] == (1.5, 33.5) and out["back_region_st"][0][0].startswith("OK　採点対象 65 行")
+           and out["back_region_rng"][0][0] == range_text4(pts),
+           f"{label}：Excel：月全体のあとに地域モード（赤道の海・設定A）へ戻すと、1位（1.5, 33.5）・状態表示・範囲表示が従来どおり")
+
+
 def check_excel(ex, path, label, workdir, student):
     print(f"\n== 3b. Excel 実機（{label}） ==")
     steps = [{"op": "info", "key": "info"}, {"op": "calc", "key": "first"}]
@@ -941,6 +1295,13 @@ def check_excel(ex, path, label, workdir, student):
         steps.append({"op": "testvalid", "sheet": S4, "addr": "C5", "value": nm, "key": f"c5_ok{i}"})
     steps.append({"op": "testvalid", "sheet": S4, "addr": "C5", "value": "でたらめ", "key": "c5_ng"})
     steps.append({"op": "testvalid", "sheet": S4, "addr": "C5", "value": "赤道の海", "key": "c5_ng2"})
+    steps.append({"op": "testvalid", "sheet": S4, "addr": "C5", "value": ALL_MOON, "key": "c5_all_ok"})
+    steps.append({"op": "testvalid", "sheet": S4, "addr": "C5", "value": "月全体", "key": "c5_all_ng"})
+    steps.append({"op": "dv", "sheet": S4, "addr": "C4", "key": "dv_c4"})
+    for k, v in (("ok50", 50), ("ok85", 85), ("ok90", 90), ("ng49", 49), ("ng91", 91), ("ng85.5", 85.5), ("ngx", "x")):
+        steps.append({"op": "testvalid", "sheet": S4, "addr": "C4", "value": v, "key": "v4_" + k})
+    steps.append({"op": "colhidden", "sheet": S4, "col": "M", "key": "m_hidden"})
+    g(S4, "M5:M14", "m_col", True)
 
     cases = []   # (key, 種別, 地域, 重み)
     # ステップ4：全地域×単一指標（重み3）
@@ -949,7 +1310,7 @@ def check_excel(ex, path, label, workdir, student):
             w = [0] * 5
             w[i] = 3
             cases.append((f"s4_{ri}_{i}", 4, reg, w))
-    # 標準の重みと、重みが全部0／1の例
+    # 式の検査例と、重みが全部0／1の例
     for lab, (reg, w) in STD4.items():
         cases.append((f"std4_{lab}", 4, reg, list(w)))
     cases.append(("s4_all1", 4, REG_FAR_EQ, [1, 1, 1, 1, 1]))
@@ -994,6 +1355,45 @@ def check_excel(ex, path, label, workdir, student):
         steps.append({"op": "calc", "key": key})
         g(S4, "A6", key + "_st", True)
         g(S4, "C26:C35", key + "_lat", True)
+    # ---- 要素ごとの分析と重み：ステップ4『月全体（線の内側）』（設計 §2.5・§3、受け入れ基準 AC9・AC11）----
+    steps.append({"op": "set", "sheet": S4, "addr": "C5", "value": ALL_MOON})
+    all_cases = []
+    for nm, w in list(SET_ALL.items()) + list(SET_ALL0.items()):
+        for ln in LINES_ALL:
+            all_cases.append((f"all_{nm}_{ln}", ln, w))
+    for ln in (80, 85):       # 規則から外れた重み（日較差だけ重く、夜0）：B36 の確認の一文が出る
+        all_cases.append((f"all_X_{ln}", ln, (1, 3, 0, 0, 0)))
+    for key, ln, w in all_cases:
+        steps.append({"op": "set", "sheet": S4, "addr": "C4", "value": ln})
+        for j, v in enumerate(w):
+            steps.append({"op": "set", "sheet": S4, "addr": f"C{8 + j}", "value": v})
+        steps.append({"op": "calc", "key": key})
+        g(S4, "C26:D35", key + "_top")
+        g(S4, "H26:H35", key + "_h")
+        g(S4, "A6", key + "_st", True)
+        g(S4, "B36", key + "_rng", True)
+    # 負の検査：C4 が空欄・範囲外（貼り付けで 95）・文字、電力の行だけ、重みが全部0、C8＝0（付記）、重みが範囲外
+    neg_cases = [("c4_blank", None, (1, 2, 0, 0, 1)), ("c4_95", 95, (1, 2, 0, 0, 1)), ("c4_49", 49, (1, 2, 0, 0, 1)),
+                 ("c4_dec", 85.5, (1, 2, 0, 0, 1)), ("c4_text", "abc", (1, 2, 0, 0, 1)),
+                 ("only_power", 70, (1, 0, 0, 0, 0)), ("zero", 70, (0, 0, 0, 0, 0)), ("c8_0", 70, (0, 2, 0, 0, 1)),
+                 ("over", 70, (1, 9, 0, 0, 1))]
+    for key, c4, w in neg_cases:
+        steps.append({"op": "set", "sheet": S4, "addr": "C4", "value": c4})
+        for j, v in enumerate(w):
+            steps.append({"op": "set", "sheet": S4, "addr": f"C{8 + j}", "value": v})
+        steps.append({"op": "calc", "key": "neg_" + key})
+        g(S4, "A6", "neg_" + key + "_st", True)
+        g(S4, "C26:D35", "neg_" + key + "_top", True)
+        g(S4, "B36", "neg_" + key + "_rng", True)
+    # 地域モードへ戻して不変を確かめる（月全体のあとに赤道の海・設定A。以前のケースと別の順序で）
+    steps.append({"op": "set", "sheet": S4, "addr": "C4", "value": 70})
+    steps.append({"op": "set", "sheet": S4, "addr": "C5", "value": "赤道の海（静かの海）"})
+    for j, v in enumerate((1, 2, 0, 0, 1)):
+        steps.append({"op": "set", "sheet": S4, "addr": f"C{8 + j}", "value": v})
+    steps.append({"op": "calc", "key": "back_region"})
+    g(S4, "C26:D35", "back_region_top")
+    g(S4, "A6", "back_region_st", True)
+    g(S4, "B36", "back_region_rng", True)
     steps.append({"op": "chart", "sheet": S1, "key": "chart1"})
     steps.append({"op": "chart", "sheet": "ステップ4b_南極", "key": "chart2"})
 
@@ -1064,6 +1464,14 @@ def check_excel(ex, path, label, workdir, student):
     steps.append({"op": "exportpdf", "sheet": S1B, "path": os.path.join(workdir, "sheet_1b.pdf"), "area": "A1:R40", "landscape": True, "fit": True})
     steps.append({"op": "exportpdf", "sheet": S1C, "path": os.path.join(workdir, "sheet_1c.pdf"), "area": "A1:N42", "landscape": True, "fit": True})
     steps.append({"op": "exportpdf", "sheet": S1, "path": os.path.join(workdir, "sheet_1.pdf"), "area": "A1:L58", "fit": True})
+    # ステップ4：月全体（線85。温度を1番にした設定A）の状態で PDF に出す（状態表示・上位10・B36 の見た目の目視確認用）
+    steps.append({"op": "set", "sheet": S4, "addr": "C5", "value": ALL_MOON})
+    steps.append({"op": "set", "sheet": S4, "addr": "C4", "value": 85})
+    for j, v in enumerate((1, 3, 0, 0, 0)):
+        steps.append({"op": "set", "sheet": S4, "addr": f"C{8 + j}", "value": v})
+    steps.append({"op": "calc", "key": "pdf4"})
+    steps.append({"op": "exportpdf", "sheet": S4, "path": os.path.join(workdir, "sheet_4.pdf"), "area": "A1:H38", "landscape": True, "fit": True})
+    steps.append({"op": "exportpdf", "sheet": "はじめに", "path": os.path.join(workdir, "sheet_intro.pdf"), "area": "A1:B34", "fit": True})
 
     out = run_excel(steps, path, workdir)
     print(f"   Excel {out.get('excel_version')}：開く {out['open_ms']} ms、初回再計算 {out.get('calc_ms_first')} ms、"
@@ -1090,12 +1498,12 @@ def check_excel(ex, path, label, workdir, student):
            f"{label}：USGS 年代（Excel）海{round(d[1][1], 2)}・陸{round(d[2][1], 2)}")
     # --- 入力規則 ---
     dv = out["dv_c5"]
-    record(dv.get("type") == 3 and dv.get("formula1") == "=RegionNames" and dv.get("in_cell_dropdown") is True
+    record(dv.get("type") == 3 and dv.get("formula1") == "=AreaChoices" and dv.get("in_cell_dropdown") is True
            and dv.get("alert_style") == 1 and dv.get("show_error") is True,
            f"{label}：C5 のプルダウン（Excel：リスト、数式 {dv.get('formula1')}、停止メッセージ）")
     ok_c5 = all(out[f"c5_ok{i}"] is True for i in range(len(ex.regions)))
-    record(ok_c5 and out["c5_ng"] is False and out["c5_ng2"] is False,
-           f"{label}：C5 の入力規則：8 地域名は受理、「でたらめ」「赤道の海」（名前の一部）は拒否")
+    record(ok_c5 and out["c5_ng"] is False and out["c5_ng2"] is False and out["c5_all_ok"] is True and out["c5_all_ng"] is False,
+           f"{label}：C5 の入力規則：8 地域名と『{ALL_MOON}』は受理、「でたらめ」「赤道の海」「月全体」（名前の一部）は拒否")
     for lab, suf in (("ステップ4 C8", ""), ("4b C8", "_b")):
         okv = [out[f"w_ok{n}{suf}"] for n in (3, 0, 5)]
         ngv = [out[f"w_ng{n}{suf}"] for n in ("-1", "9", "2.5", "abc")]
@@ -1126,11 +1534,11 @@ def check_excel(ex, path, label, workdir, student):
             bad_eq.append(key)
         if key.startswith("s4_") or key.startswith("s4b_single"):
             n_dist += 1
-    record(not bad_dist, f"{label}：Excel の上位10が全部異なる地点（全地域×単一指標 40＋4b 単一指標 4＋標準の重み ほか）",
+    record(not bad_dist, f"{label}：Excel の上位10が全部異なる地点（全地域×単一指標 40＋4b 単一指標 4＋式の検査例 ほか）",
            "" if not bad_dist else str(bad_dist[:5]))
     record(not bad_eq, f"{label}：Excel の上位10（緯度・経度、全 {len(cases) - 1} 通り）が pandas の再現と一致",
            "" if not bad_eq else str(bad_eq[:8]))
-    # 標準の重みの1位
+    # 式の検査例の1位
     for lab, (reg, w) in STD4.items():
         got = top_from(out[f"std4_{lab}_top"])
         ro, po, _ = ex.top4(reg, list(w), "old")
@@ -1140,8 +1548,8 @@ def check_excel(ex, path, label, workdir, student):
         ro, po, _ = ex.top4b(list(w), "old")
         record(got[0] == po[0], f"{label}：{lab} の1位（Excel）{got[0]}は変更前の1位 {po[0]} と同じ")
     # --- 表示のスコアの見た目 ---
-    sc_rows = out["std4_電波天文（裏側・赤道）_score"]
-    reg, w = STD4["電波天文（裏側・赤道）"]
+    sc_rows = out[f"std4_{K_STD4_FAR}_score"]
+    reg, w = STD4[K_STD4_FAR]
     _, _, sc = ex.top4(reg, list(w))
     rows, _, _ = ex.top4(reg, list(w))
     exp_scores = [f"{round(sc[x - 2], 3):.3f}".rstrip("0").rstrip(".") for x in rows]
@@ -1185,6 +1593,7 @@ def check_excel(ex, path, label, workdir, student):
     record(rng == range_text4(pts), f"{label}：日付変更線をまたぐ領域の範囲表示：{rng}")
 
     check_excel_dai2ji(ex, out, label, student, LINES_CHECK)
+    check_excel_v3(ex, out, label, student)
     # --- G10 チャートの位置 ---
     ch = out["chart1"][0]
     record(ch[1] == "$D$21", f"{label}：ステップ1のチャートは D21 起点（注意書き A19:H19 に重ならない）", f"{ch[1]}〜{ch[2]}")
@@ -1205,6 +1614,7 @@ def main():
 
     check_answers(a.teacher, a.student)
     check_mission_words(a.teacher, a.student)
+    check_v3_student_words(a.teacher, a.student)
     check_region_names(a.teacher, "教員版")
     check_region_names(a.student, "学習者版")
     check_pii(a.teacher, "教員版")

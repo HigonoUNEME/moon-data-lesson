@@ -121,6 +121,11 @@ try {
                 }
                 $result[[string]$s.key] = $o
             }
+            "colhidden" {
+                # whether a column is hidden (e.g. the helper column M that holds the drop-down list)
+                $ws = $wb.Worksheets.Item([string]$s.sheet)
+                $result[[string]$s.key] = [bool]$ws.Columns.Item([string]$s.col).Hidden
+            }
             "rowinfo" {
                 $ws = $wb.Worksheets.Item([string]$s.sheet)
                 $o = @()
